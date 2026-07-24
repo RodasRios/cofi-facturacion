@@ -23,20 +23,4 @@ client.interceptors.response.use(
   }
 );
 
-/**
- * Descarga un archivo protegido por JWT enviando el token en el header.
- */
-export async function downloadAuthed(url: string, filename: string): Promise<void> {
-  const res = await client.get(url, { responseType: "blob" });
-  const blob = new Blob([res.data], { type: (res.headers["content-type"] as string | undefined) ?? "application/pdf" });
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = objectUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(objectUrl);
-}
-
 export default client;

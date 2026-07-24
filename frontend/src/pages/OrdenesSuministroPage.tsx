@@ -1,14 +1,16 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getOrdenesSuministro, notificarOrdenSuministro } from "../api/ordenesSuministro";
-import { downloadAuthed } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { Icon } from "../components/ui/Icon";
+import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 
 export function OrdenesSuministroPage() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const { data: ordenes, isLoading } = useQuery({ queryKey: ["ordenes-suministro"], queryFn: () => getOrdenesSuministro() });
+  const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
 
   const esPlanta = user?.is_admin || user?.rol === "planta";
 
@@ -51,7 +53,7 @@ export function OrdenesSuministroPage() {
                 </td>
                 <td>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                    <button className="btn-ghost" title="Descargar PDF" onClick={() => downloadAuthed(`/ordenes-suministro/${o.id}/pdf/`, `${o.numero}.pdf`)}>
+                    <button className="btn-ghost" title="Ver PDF" onClick={() => setPdfViewer({ url: `/ordenes-suministro/${o.id}/pdf/`, filename: `${o.numero}.pdf` })}>
                       <Icon name="picture_as_pdf" size={16} />
                     </button>
                     {esPlanta && !o.notificada_planta && (
@@ -69,6 +71,8 @@ export function OrdenesSuministroPage() {
           </tbody>
         </table>
       </div>
+
+      {pdfViewer && <PdfViewerModal url={pdfViewer.url} filename={pdfViewer.filename} onClose={() => setPdfViewer(null)} />}
     </div>
   );
 }

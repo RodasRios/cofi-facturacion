@@ -4,9 +4,9 @@ import { toast } from "sonner";
 import { getCotizaciones, createCotizacion, aprobarCotizacion } from "../api/cotizaciones";
 import { getSolicitudes } from "../api/solicitudes";
 import { getPlantas } from "../api/plantas";
-import { downloadAuthed } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { Icon } from "../components/ui/Icon";
+import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 import type { CotizacionEstado } from "../types";
 
 const ESTADO_LABEL: Record<CotizacionEstado, string> = {
@@ -28,6 +28,7 @@ export function CotizacionesPage() {
   const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: getPlantas });
 
   const puedeAprobar = user?.is_admin || user?.rol === "aprobador";
+  const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [solicitudId, setSolicitudId] = useState("");
@@ -134,7 +135,7 @@ export function CotizacionesPage() {
                 <td>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     {c.pdf_path && (
-                      <button className="btn-ghost" title="Descargar PDF" onClick={() => downloadAuthed(`/cotizaciones/${c.id}/pdf/`, `${c.numero}.pdf`)}>
+                      <button className="btn-ghost" title="Ver PDF" onClick={() => setPdfViewer({ url: `/cotizaciones/${c.id}/pdf/`, filename: `${c.numero}.pdf` })}>
                         <Icon name="picture_as_pdf" size={16} />
                       </button>
                     )}
@@ -158,6 +159,8 @@ export function CotizacionesPage() {
           </tbody>
         </table>
       </div>
+
+      {pdfViewer && <PdfViewerModal url={pdfViewer.url} filename={pdfViewer.filename} onClose={() => setPdfViewer(null)} />}
     </div>
   );
 }

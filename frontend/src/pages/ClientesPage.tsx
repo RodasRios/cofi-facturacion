@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getClientes, createCliente, marcarVinculado } from "../api/clientes";
-import { downloadAuthed } from "../api/client";
 import { Icon } from "../components/ui/Icon";
+import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 
 export function ClientesPage() {
   const qc = useQueryClient();
   const { data: clientes, isLoading } = useQuery({ queryKey: ["clientes"], queryFn: () => getClientes() });
+  const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [nombre, setNombre] = useState("");
@@ -114,8 +115,8 @@ export function ClientesPage() {
                 <td>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     {c.pdf_path && (
-                      <button className="btn-ghost" title="Descargar formato de vinculación"
-                        onClick={() => downloadAuthed(`/clientes/${c.id}/pdf/`, `${c.numero_vinculacion}.pdf`)}>
+                      <button className="btn-ghost" title="Ver formato de vinculación"
+                        onClick={() => setPdfViewer({ url: `/clientes/${c.id}/pdf/`, filename: `${c.numero_vinculacion}.pdf` })}>
                         <Icon name="picture_as_pdf" size={16} />
                       </button>
                     )}
@@ -134,6 +135,8 @@ export function ClientesPage() {
           </tbody>
         </table>
       </div>
+
+      {pdfViewer && <PdfViewerModal url={pdfViewer.url} filename={pdfViewer.filename} onClose={() => setPdfViewer(null)} />}
     </div>
   );
 }
