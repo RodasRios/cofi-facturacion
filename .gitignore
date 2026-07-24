@@ -1,0 +1,22 @@
+# Python / Django
+venv/
+__pycache__/
+*.pyc
+*.db
+media/uploads/*
+!media/uploads/.gitkeep
+media/generated_pdfs/*
+!media/generated_pdfs/.gitkeep
+.env
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store

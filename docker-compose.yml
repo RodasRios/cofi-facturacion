@@ -1,0 +1,57 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: facturacion_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-facturacion}
+      POSTGRES_USER: ${DB_USER:-facturacion_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-facturacion123}
+    ports:
+      - "5433:5432"
+    volumes:
+      - facturacion_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-facturacion_user} -d ${DB_NAME:-facturacion}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend/backend_django
+      dockerfile: Dockerfile
+    container_name: facturacion_backend
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-cambia-esta-clave-en-produccion}
+      DEBUG: "False"
+      DB_NAME: ${DB_NAME:-facturacion}
+      DB_USER: ${DB_USER:-facturacion_user}
+      DB_PASSWORD: ${DB_PASSWORD:-facturacion123}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+    volumes:
+      - facturacion_media:/app/media
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: facturacion_frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:80"
+    depends_on:
+      - backend
+
+volumes:
+  facturacion_pgdata:
+  facturacion_media:

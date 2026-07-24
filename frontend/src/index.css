@@ -1,0 +1,233 @@
+@import "tailwindcss";
+
+/* ── Fuentes ───────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 100 700;
+  src: url("/MaterialSymbolsOutlined.ttf") format("truetype");
+  font-display: block;
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24;
+  user-select: none;
+  width: 1em;
+  height: 1em;
+  overflow: hidden;
+  vertical-align: middle;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+html.fonts-ready .material-symbols-outlined { opacity: 1; }
+
+/* ── Reset base ────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+/* ── Variables de tema (light) ─────────────────────────────────────────────── */
+:root {
+  --bg-base:        #f0f2f5;
+  --bg-surface:     #ffffff;
+  --bg-surface-2:   #f5f6f8;
+  --bg-header:      #1e3a5f;
+  --bg-header-2:    #162d4a;
+  --bg-table-head:  #1e3a5f;
+  --border:         #d0d5dd;
+  --border-strong:  #adb5bd;
+  --text-primary:   #0f1923;
+  --text-secondary: #4b5563;
+  --text-muted:     #8b9ab0;
+  --text-header:    #ffffff;
+  --accent:         #0f6cbd;
+  --accent-hover:   #0d5aa7;
+  --accent-light:   #dbeafe;
+  --accent-text:    #1d4ed8;
+  --shadow:         0 1px 4px rgba(0,0,0,0.10);
+  --shadow-md:      0 2px 8px rgba(0,0,0,0.13);
+}
+
+/* ── Variables de tema (dark) ──────────────────────────────────────────────── */
+.dark {
+  --bg-base:        #0d1117;
+  --bg-surface:     #161b22;
+  --bg-surface-2:   #1c2230;
+  --bg-header:      #0d1117;
+  --bg-header-2:    #090d12;
+  --bg-table-head:  #1c2230;
+  --border:         #2d3748;
+  --border-strong:  #4a5568;
+  --text-primary:   #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted:     #4a5568;
+  --text-header:    #e2e8f0;
+  --accent:         #3b82f6;
+  --accent-hover:   #2563eb;
+  --accent-light:   #1e3a5f;
+  --accent-text:    #60a5fa;
+  --shadow:         0 1px 4px rgba(0,0,0,0.4);
+  --shadow-md:      0 2px 8px rgba(0,0,0,0.5);
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  transition: background 0.2s, color 0.2s;
+}
+
+#root { min-height: 100vh; }
+
+/* ── Scrollbar discreta ────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+/* ── Clases de utilidad UI "sharp" ────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.input-base {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input-base:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(15,108,189,0.2);
+}
+.dark .input-base:focus {
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.25);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-secondary:hover:not(:disabled) { background: var(--border); }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-ghost:hover { background: var(--bg-surface-2); color: var(--text-primary); border-color: var(--border); }
+
+.btn-danger {
+  background: transparent;
+  color: #dc2626;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn-danger:hover { background: #fef2f2; border-color: #fca5a5; }
+.dark .btn-danger:hover { background: #2d0f0f; border-color: #7f1d1d; }
+
+.table-sharp {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table-sharp th {
+  background: var(--bg-table-head);
+  color: var(--text-header);
+  font-weight: 500;
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  border-right: 1px solid rgba(255,255,255,0.07);
+  white-space: nowrap;
+  user-select: none;
+}
+.table-sharp th:last-child { border-right: none; }
+.table-sharp td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.table-sharp tbody tr:last-child td { border-bottom: none; }
+.table-sharp tbody tr:hover td { background: var(--bg-surface-2); }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 6px 0 4px;
+}
