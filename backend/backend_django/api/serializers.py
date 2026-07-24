@@ -71,10 +71,10 @@ class ClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cliente
         fields = [
-            "id", "nombre", "nit", "telefono", "email", "direccion",
-            "vinculado", "documento_vinculacion_path", "creado_por", "creado_por_username", "created_at",
+            "id", "nombre", "nit", "telefono", "email", "direccion", "numero_vinculacion",
+            "vinculado", "pdf_path", "creado_por", "creado_por_username", "created_at",
         ]
-        read_only_fields = ["creado_por", "documento_vinculacion_path"]
+        read_only_fields = ["creado_por", "numero_vinculacion", "pdf_path"]
 
 
 class SolicitudCotizacionItemSerializer(serializers.ModelSerializer):

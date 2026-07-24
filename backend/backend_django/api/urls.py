@@ -3,7 +3,7 @@ from api.views.auth_views import LoginView, MeView, UserFirmaView
 from api.views.user_views import UserListCreateView, UserDetailView
 from api.views.planta_views import PlantaListCreateView, PlantaDetailView
 from api.views.material_views import MaterialListCreateView, MaterialDetailView, MaterialPrecioView
-from api.views.cliente_views import ClienteListCreateView, ClienteDetailView, ClienteVinculacionView
+from api.views.cliente_views import ClienteListCreateView, ClienteDetailView, ClientePdfView
 from api.views.solicitud_views import SolicitudCotizacionListCreateView, SolicitudCotizacionDetailView
 from api.views.cotizacion_views import (
     CotizacionListCreateView, CotizacionDetailView, CotizacionAprobarView, CotizacionPdfView,
@@ -44,7 +44,7 @@ urlpatterns += p("materiales/<int:material_id>/", MaterialDetailView.as_view())
 urlpatterns += p("materiales/", MaterialListCreateView.as_view())
 
 # Clientes
-urlpatterns += p("clientes/<int:cliente_id>/vinculacion/", ClienteVinculacionView.as_view())
+urlpatterns += p("clientes/<int:cliente_id>/pdf/", ClientePdfView.as_view())
 urlpatterns += p("clientes/<int:cliente_id>/", ClienteDetailView.as_view())
 urlpatterns += p("clientes/", ClienteListCreateView.as_view())
 

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getClientes, createCliente, uploadVinculacion } from "../api/clientes";
+import { getClientes, createCliente, marcarVinculado } from "../api/clientes";
+import { downloadAuthed } from "../api/client";
 import { Icon } from "../components/ui/Icon";
 
 export function ClientesPage() {
@@ -19,7 +20,7 @@ export function ClientesPage() {
     mutationFn: () => createCliente({ nombre, nit, telefono, email, direccion }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clientes"] });
-      toast.success("Cliente creado");
+      toast.success("Cliente creado — formato de vinculación generado automáticamente");
       setShowForm(false);
       setNombre(""); setNit(""); setTelefono(""); setEmail(""); setDireccion("");
     },
@@ -27,12 +28,12 @@ export function ClientesPage() {
   });
 
   const vincularMut = useMutation({
-    mutationFn: ({ id, file }: { id: number; file: File }) => uploadVinculacion(id, file),
+    mutationFn: (id: number) => marcarVinculado(id, true),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clientes"] });
-      toast.success("Formato de vinculación cargado");
+      toast.success("Cliente marcado como vinculado");
     },
-    onError: () => toast.error("No se pudo cargar el archivo"),
+    onError: () => toast.error("No se pudo actualizar el cliente"),
   });
 
   return (
@@ -81,18 +82,21 @@ export function ClientesPage() {
         <table className="table-sharp">
           <thead>
             <tr>
+              <th>N.° Vinculación</th>
               <th>Nombre</th>
               <th>NIT</th>
               <th>Teléfono</th>
               <th>Email</th>
-              <th>Vinculación</th>
+              <th>Estado</th>
               <th>Creado por</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td colSpan={6} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
+            {isLoading && <tr><td colSpan={8} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
             {clientes?.map(c => (
               <tr key={c.id}>
+                <td>{c.numero_vinculacion || "-"}</td>
                 <td>{c.nombre}</td>
                 <td>{c.nit || "-"}</td>
                 <td>{c.telefono || "-"}</td>
@@ -103,24 +107,29 @@ export function ClientesPage() {
                       <Icon name="check_circle" size={12} />Vinculado
                     </span>
                   ) : (
-                    <label style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--accent-text)" }}>
-                      <Icon name="upload_file" size={13} />
-                      Cargar formato
-                      <input type="file" accept=".pdf,.png,.jpg,.jpeg" style={{ display: "none" }}
-                        onChange={e => {
-                          const file = e.target.files?.[0];
-                          if (file) vincularMut.mutate({ id: c.id, file });
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
+                    <span className="badge" style={{ background: "#f59e0b22", color: "#f59e0b" }}>Pendiente</span>
                   )}
                 </td>
                 <td>{c.creado_por_username || "-"}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    {c.pdf_path && (
+                      <button className="btn-ghost" title="Descargar formato de vinculación"
+                        onClick={() => downloadAuthed(`/clientes/${c.id}/pdf/`, `${c.numero_vinculacion}.pdf`)}>
+                        <Icon name="picture_as_pdf" size={16} />
+                      </button>
+                    )}
+                    {!c.vinculado && (
+                      <button className="btn-secondary" onClick={() => vincularMut.mutate(c.id)}>
+                        <Icon name="check" size={14} />Marcar vinculado
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {!isLoading && clientes?.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>Sin clientes todavía</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>Sin clientes todavía</td></tr>
             )}
           </tbody>
         </table>

@@ -13,9 +13,7 @@ export async function createCliente(data: {
   return res.data;
 }
 
-export async function uploadVinculacion(clienteId: number, file: File): Promise<Cliente> {
-  const form = new FormData();
-  form.append("file", file);
-  const res = await client.post(`/clientes/${clienteId}/vinculacion/`, form);
+export async function marcarVinculado(clienteId: number, vinculado: boolean): Promise<Cliente> {
+  const res = await client.patch(`/clientes/${clienteId}/`, { vinculado });
   return res.data;
 }

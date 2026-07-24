@@ -1,10 +1,36 @@
+import logging
 from pathlib import Path
 from django.conf import settings
+from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from api.models import Cliente
 from api.serializers import ClienteSerializer
+from services.pdf_service import generate_vinculacion
+
+logger = logging.getLogger(__name__)
+
+
+def _numero_vinculacion():
+    count = Cliente.objects.exclude(numero_vinculacion__isnull=True).count()
+    return f"VIN-{count + 1:04d}"
+
+
+def _generar_pdf(cliente):
+    pdf_dir = settings.GENERATED_PDF_DIR
+    pdf_path = pdf_dir / f"VIN_{cliente.id}_{cliente.numero_vinculacion.replace('-', '_')}.pdf"
+    try:
+        generate_vinculacion(
+            pdf_path, cliente.numero_vinculacion, cliente.created_at.date(),
+            {
+                "nombre": cliente.nombre, "nit": cliente.nit,
+                "telefono": cliente.telefono, "email": cliente.email, "direccion": cliente.direccion,
+            },
+        )
+        cliente.pdf_path = str(pdf_path)
+        cliente.save(update_fields=["pdf_path"])
+    except Exception as e:
+        logger.error("Error generando PDF de vinculación %s: %s", cliente.numero_vinculacion, e)
 
 
 class ClienteListCreateView(APIView):
@@ -19,8 +45,10 @@ class ClienteListCreateView(APIView):
         ser = ClienteSerializer(data=request.data)
         if not ser.is_valid():
             return Response(ser.errors, status=400)
-        ser.save(creado_por=request.user)
-        return Response(ser.data, status=201)
+        cliente = ser.save(creado_por=request.user, numero_vinculacion=_numero_vinculacion())
+        _generar_pdf(cliente)
+        cliente.refresh_from_db()
+        return Response(ClienteSerializer(cliente).data, status=201)
 
 
 class ClienteDetailView(APIView):
@@ -44,29 +72,12 @@ class ClienteDetailView(APIView):
         return Response(ser.data)
 
 
-class ClienteVinculacionView(APIView):
-    """Sube el formato de vinculación firmado por un cliente nuevo y lo marca como vinculado."""
-    parser_classes = [MultiPartParser, FormParser]
-
-    def post(self, request, cliente_id):
+class ClientePdfView(APIView):
+    def get(self, request, cliente_id):
         cliente = Cliente.objects.filter(id=cliente_id).first()
-        if not cliente:
-            return Response({"detail": "No encontrado"}, status=404)
-        file = request.FILES.get("file")
-        if not file:
-            return Response({"detail": "No se envió archivo"}, status=400)
-        ext = Path(file.name).suffix.lower()
-        if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
-            return Response({"detail": "Solo PDF, PNG o JPG"}, status=400)
-
-        dest_dir = settings.UPLOAD_DIR / "vinculacion"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"vinculacion_cliente_{cliente.id}{ext}"
-        with dest.open("wb") as f:
-            for chunk in file.chunks():
-                f.write(chunk)
-
-        cliente.documento_vinculacion_path = str(dest)
-        cliente.vinculado = True
-        cliente.save(update_fields=["documento_vinculacion_path", "vinculado"])
-        return Response(ClienteSerializer(cliente).data)
+        if not cliente or not cliente.pdf_path:
+            return Response({"detail": "PDF no disponible"}, status=404)
+        path = Path(cliente.pdf_path)
+        if not path.exists():
+            return Response({"detail": "Archivo no encontrado"}, status=404)
+        return FileResponse(path.open("rb"), content_type="application/pdf", as_attachment=True, filename=f"{cliente.numero_vinculacion}.pdf")

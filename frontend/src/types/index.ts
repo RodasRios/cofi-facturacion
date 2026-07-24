@@ -48,8 +48,9 @@ export interface Cliente {
   telefono: string | null;
   email: string | null;
   direccion: string | null;
+  numero_vinculacion: string | null;
   vinculado: boolean;
-  documento_vinculacion_path: string | null;
+  pdf_path: string | null;
   creado_por: number | null;
   creado_por_username: string | null;
   created_at: string;

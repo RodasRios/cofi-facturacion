@@ -99,8 +99,9 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=30, blank=True, null=True)
     email = models.EmailField(max_length=254, blank=True, null=True)
     direccion = models.CharField(max_length=300, blank=True, null=True)
+    numero_vinculacion = models.CharField(max_length=50, unique=True, null=True)
     vinculado = models.BooleanField(default=False)
-    documento_vinculacion_path = models.CharField(max_length=500, blank=True, null=True)
+    pdf_path = models.CharField(max_length=500, blank=True, null=True)
     creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="clientes_creados")
     created_at = models.DateTimeField(auto_now_add=True)
 
