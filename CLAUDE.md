@@ -38,6 +38,29 @@ This is deliberately scoped to **stop at the despacho/remisión step**. The rest
 
 **All four "FORMATO" documents in the flow are auto-generated PDFs, never manually uploaded.** This was a deliberate correction early on: the vinculación PDF originally required uploading an externally-created file, which was inconsistent with the other three formats and got fixed to generate automatically like the rest — don't reintroduce an upload-based flow for any new formato without discussing it first.
 
+### Links de vinculación (`ClienteToken`)
+
+El `Formato de Vinculación` puede llenarlo el propio cliente en vez del comercial.
+El comercial genera un token en Clientes → "Link para cliente", copia el link
+(`/vincular/<token>`) y se lo manda. El cliente lo abre **sin tener usuario** —
+el token es la credencial — llena los mismos campos que `ClienteSerializer`
+expone en "Nuevo cliente", y al enviarlo se crea el `Cliente` con su
+`numero_vinculacion` y su PDF, igual que por la vía interna.
+
+- **Un solo uso y 3 días de vigencia** (`VINCULACION_TOKEN_DIAS` en `models.py`).
+  `ClienteToken.estado` deriva de `usado_at`/`revocado`/`expira_at`; no se guarda.
+- El `POST` público toma el token con `select_for_update()` dentro de una
+  transacción: sin eso, dos envíos simultáneos del mismo link crearían dos clientes.
+- `VinculacionPublicaView` lleva `authentication_classes = []` y un
+  `AnonRateThrottle` con scope `vinculacion_publica` (`DEFAULT_THROTTLE_RATES`
+  en settings), porque es el único endpoint sin login de la app.
+- En el frontend, `api/clienteTokens.ts` usa una instancia de axios **aparte**
+  para lo público: el `client` compartido manda el `Authorization` guardado y
+  redirige a `/login` ante un 401, y nada de eso aplica a un visitante sin cuenta.
+- La ruta `/vincular/:token` va fuera del `Shell` en `App.tsx` (sin `ProtectedRoute`).
+- `api/tests.py` cubre el flujo completo, el un-solo-uso, vencido/revocado y el
+  gate de rol.
+
 ### Roles
 
 `User.rol` (plain `CharField`, not `AbstractUser`) is one of `comercial | aprobador | financiera | planta`, gating the corresponding step above via the permission classes in `api/permissions.py` (`IsComercial`, `IsAprobador`, `IsFinanciera`, `IsPlanta`). `User.is_admin` is a blanket override — `_has_rol()` in `permissions.py` lets an admin through regardless of `rol`. There is no `is_superadmin` and no TOTP/2FA in this project (both exist in `cofi-gestor-insumos` but were deliberately left out here to keep scope small).

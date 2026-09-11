@@ -56,6 +56,23 @@ export interface Cliente {
   created_at: string;
 }
 
+export type ClienteTokenEstado = "activo" | "usado" | "vencido" | "revocado";
+
+export interface ClienteToken {
+  id: number;
+  token: string;
+  etiqueta: string | null;
+  estado: ClienteTokenEstado;
+  expira_at: string;
+  usado_at: string | null;
+  cliente: number | null;
+  cliente_nombre: string | null;
+  revocado: boolean;
+  creado_por: number | null;
+  creado_por_username: string | null;
+  created_at: string;
+}
+
 export interface SolicitudCotizacionItem {
   id: number;
   material: number;

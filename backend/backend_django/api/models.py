@@ -1,5 +1,8 @@
+import secrets
+from datetime import timedelta
 from decimal import Decimal
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
 
@@ -111,6 +114,65 @@ class Cliente(models.Model):
 
     def __str__(self):
         return self.nombre
+
+
+VINCULACION_TOKEN_DIAS = 3
+
+
+def _generar_token():
+    return secrets.token_urlsafe(32)
+
+
+def _vencimiento_por_defecto():
+    return timezone.now() + timedelta(days=VINCULACION_TOKEN_DIAS)
+
+
+class ClienteToken(models.Model):
+    """Link de un solo uso para que el cliente llene su propia vinculación.
+
+    El comercial genera el token, copia el link y se lo manda al cliente. El
+    cliente abre el link sin necesidad de tener usuario, llena los mismos datos
+    que pediría el formulario de "Nuevo cliente", y al enviarlo se crea el
+    ``Cliente`` con su ``numero_vinculacion`` y su PDF, igual que si lo hubiera
+    creado el comercial a mano.
+    """
+    token = models.CharField(max_length=64, unique=True, db_index=True, default=_generar_token)
+    # Referencia para que el comercial sepa de quién es cada link en la lista.
+    etiqueta = models.CharField(max_length=200, blank=True, null=True)
+    expira_at = models.DateTimeField(default=_vencimiento_por_defecto)
+    usado_at = models.DateTimeField(null=True, blank=True)
+    # Queda apuntando al cliente que se creó al usarlo, para poder rastrearlo.
+    cliente = models.ForeignKey(
+        Cliente, on_delete=models.SET_NULL, null=True, blank=True, related_name="tokens_vinculacion",
+    )
+    revocado = models.BooleanField(default=False)
+    creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="tokens_cliente_creados")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "cliente_tokens"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Token vinculación {self.etiqueta or self.token[:8]}"
+
+    @property
+    def vencido(self):
+        return timezone.now() >= self.expira_at
+
+    @property
+    def estado(self):
+        if self.usado_at:
+            return "usado"
+        if self.revocado:
+            return "revocado"
+        if self.vencido:
+            return "vencido"
+        return "activo"
+
+    @property
+    def utilizable(self):
+        return self.estado == "activo"
 
 
 SOLICITUD_ESTADO_CHOICES = [

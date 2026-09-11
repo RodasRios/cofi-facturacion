@@ -98,6 +98,26 @@ docker compose up --build -d
 Las migraciones se aplican solas al arrancar (`entrypoint.sh` corre `migrate`,
 nunca `makemigrations` — esas se generan en local y se commitean).
 
+## Cambiar `DB_PASSWORD` cuando ya hay datos
+
+Postgres lee `POSTGRES_PASSWORD` **solo la primera vez**, cuando inicializa el
+volumen. Después la ignora. Si se cambia `DB_PASSWORD` en el `.env` de un
+proyecto que ya arrancó, el backend queda en `Restarting` con
+`password authentication failed for user "facturacion_user"`.
+
+Con el volumen vacío basta `docker compose down -v && docker compose up --build -d`,
+pero eso **borra la base de datos**. Con datos reales, hay que cambiarla también
+dentro de Postgres:
+
+```bash
+# 1. Cambiar la contraseña dentro de Postgres (con la clave NUEVA del .env)
+docker exec -it facturacion_postgres psql -U facturacion_user -d facturacion \
+    -c "ALTER USER facturacion_user WITH PASSWORD 'la-clave-nueva';"
+
+# 2. Poner esa misma clave en el .env y reiniciar solo el backend
+docker compose up -d --force-recreate backend
+```
+
 ## Respaldo de la base de datos
 
 ```bash

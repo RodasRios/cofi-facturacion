@@ -76,6 +76,10 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
+    # El formulario público de vinculación no pide login, así que se limita por IP.
+    "DEFAULT_THROTTLE_RATES": {
+        "vinculacion_publica": "20/hour",
+    },
 }
 
 SIMPLE_JWT = {

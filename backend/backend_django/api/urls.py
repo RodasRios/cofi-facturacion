@@ -4,6 +4,9 @@ from api.views.user_views import UserListCreateView, UserDetailView
 from api.views.planta_views import PlantaListCreateView, PlantaDetailView
 from api.views.material_views import MaterialListCreateView, MaterialDetailView, MaterialPrecioView
 from api.views.cliente_views import ClienteListCreateView, ClienteDetailView, ClientePdfView
+from api.views.cliente_token_views import (
+    ClienteTokenListCreateView, ClienteTokenRevocarView, VinculacionPublicaView,
+)
 from api.views.solicitud_views import SolicitudCotizacionListCreateView, SolicitudCotizacionDetailView
 from api.views.cotizacion_views import (
     CotizacionListCreateView, CotizacionDetailView, CotizacionAprobarView, CotizacionPdfView,
@@ -42,6 +45,13 @@ urlpatterns += p("plantas/<int:planta_id>/", PlantaDetailView.as_view())
 urlpatterns += p("materiales/<int:material_id>/precios/", MaterialPrecioView.as_view())
 urlpatterns += p("materiales/<int:material_id>/", MaterialDetailView.as_view())
 urlpatterns += p("materiales/", MaterialListCreateView.as_view())
+
+# Links de vinculación (el comercial los genera, el cliente los usa)
+urlpatterns += p("cliente-tokens/<int:token_id>/", ClienteTokenRevocarView.as_view())
+urlpatterns += p("cliente-tokens/", ClienteTokenListCreateView.as_view())
+
+# Formulario público de vinculación — sin auth, el token es la credencial
+urlpatterns += p("publico/vinculacion/<str:token>/", VinculacionPublicaView.as_view())
 
 # Clientes
 urlpatterns += p("clientes/<int:cliente_id>/pdf/", ClientePdfView.as_view())

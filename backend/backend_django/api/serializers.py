@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    User, Planta, Material, MaterialPlanta, Cliente,
+    User, Planta, Material, MaterialPlanta, Cliente, ClienteToken,
     SolicitudCotizacion, SolicitudCotizacionItem,
     Cotizacion, CotizacionItem, Pago, OrdenSuministro,
     Despacho, DespachoItem,
@@ -75,6 +75,32 @@ class ClienteSerializer(serializers.ModelSerializer):
             "vinculado", "pdf_path", "creado_por", "creado_por_username", "created_at",
         ]
         read_only_fields = ["creado_por", "numero_vinculacion", "pdf_path"]
+
+
+class ClienteTokenSerializer(serializers.ModelSerializer):
+    creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    estado = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = ClienteToken
+        fields = [
+            "id", "token", "etiqueta", "estado", "expira_at", "usado_at",
+            "cliente", "cliente_nombre", "revocado",
+            "creado_por", "creado_por_username", "created_at",
+        ]
+        read_only_fields = [
+            "token", "estado", "expira_at", "usado_at", "cliente", "revocado", "creado_por",
+        ]
+
+
+class VinculacionPublicaSerializer(serializers.ModelSerializer):
+    """Los mismos campos que llena el comercial en "Nuevo cliente"."""
+
+    class Meta:
+        model = Cliente
+        fields = ["nombre", "nit", "telefono", "email", "direccion"]
+        extra_kwargs = {"nombre": {"required": True, "allow_blank": False}}
 
 
 class SolicitudCotizacionItemSerializer(serializers.ModelSerializer):

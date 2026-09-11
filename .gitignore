@@ -3,10 +3,12 @@ venv/
 __pycache__/
 *.pyc
 *.db
-media/uploads/*
-!media/uploads/.gitkeep
-media/generated_pdfs/*
-!media/generated_pdfs/.gitkeep
+# Con la barra interna, estos patrones se anclan a la raíz del repo, así que
+# hace falta el **/ para que también cubran backend/backend_django/media/.
+**/media/uploads/*
+!**/media/uploads/.gitkeep
+**/media/generated_pdfs/*
+!**/media/generated_pdfs/.gitkeep
 .env
 
 # Node / frontend

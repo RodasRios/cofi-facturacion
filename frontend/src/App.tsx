@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { AppShell } from "./components/layout/AppShell";
 import { LoginPage } from "./pages/LoginPage";
+import { VinculacionPublicaPage } from "./pages/VinculacionPublicaPage";
 import { ClientesPage } from "./pages/ClientesPage";
 import { SolicitudesCotizacionPage } from "./pages/SolicitudesCotizacionPage";
 import { CotizacionesPage } from "./pages/CotizacionesPage";
@@ -18,6 +19,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+
+      {/* Pública: el cliente entra por el link que le manda el comercial, sin usuario */}
+      <Route path="/vincular/:token" element={<VinculacionPublicaPage />} />
 
       <Route path="/" element={<Navigate to="/solicitudes" replace />} />
       <Route path="/clientes" element={<Shell><ClientesPage /></Shell>} />

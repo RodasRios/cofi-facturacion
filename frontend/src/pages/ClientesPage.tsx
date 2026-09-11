@@ -4,11 +4,18 @@ import { toast } from "sonner";
 import { getClientes, createCliente, marcarVinculado } from "../api/clientes";
 import { Icon } from "../components/ui/Icon";
 import { PdfViewerModal } from "../components/ui/PdfViewerModal";
+import { LinksVinculacion } from "../components/LinksVinculacion";
+import { useAuth } from "../contexts/AuthContext";
 
 export function ClientesPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const { data: clientes, isLoading } = useQuery({ queryKey: ["clientes"], queryFn: () => getClientes() });
   const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
+
+  // Los links de vinculación los genera el comercial (o un admin).
+  const puedeGenerarLinks = !!user && (user.is_admin || user.rol === "comercial");
+  const [showLinks, setShowLinks] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [nombre, setNombre] = useState("");
@@ -41,10 +48,19 @@ export function ClientesPage() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Clientes</h1>
-        <button className="btn-primary" onClick={() => setShowForm(v => !v)}>
-          <Icon name="add" size={16} />Nuevo cliente
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {puedeGenerarLinks && (
+            <button className="btn-secondary" onClick={() => setShowLinks(v => !v)}>
+              <Icon name="link" size={16} />Link para cliente
+            </button>
+          )}
+          <button className="btn-primary" onClick={() => setShowForm(v => !v)}>
+            <Icon name="add" size={16} />Nuevo cliente
+          </button>
+        </div>
       </div>
+
+      {showLinks && puedeGenerarLinks && <LinksVinculacion />}
 
       {showForm && (
         <form
