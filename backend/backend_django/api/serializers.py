@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     User, Planta, Material, MaterialPlanta, Cliente, ClienteToken,
     SolicitudCotizacion, SolicitudCotizacionItem,
-    Cotizacion, CotizacionItem, Pago, OrdenSuministro, Seguimiento,
+    Cotizacion, CotizacionItem, Pago, OrdenSuministro, Seguimiento, SolicitudToken,
     Despacho, DespachoItem,
 )
 
@@ -125,6 +125,22 @@ class SeguimientoSerializer(serializers.ModelSerializer):
         read_only_fields = ["solicitud", "usuario"]
 
 
+class SolicitudTokenSerializer(serializers.ModelSerializer):
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
+    estado = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = SolicitudToken
+        fields = [
+            "id", "token", "cliente", "cliente_nombre", "estado", "activo", "expira_at",
+            "usos", "ultimo_uso_at", "creado_por", "creado_por_username", "created_at",
+        ]
+        read_only_fields = [
+            "token", "estado", "activo", "usos", "ultimo_uso_at", "creado_por",
+        ]
+
+
 class SolicitudCotizacionSerializer(serializers.ModelSerializer):
     items = SolicitudCotizacionItemSerializer(many=True, read_only=True)
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
@@ -153,10 +169,19 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
     material_nombre = serializers.CharField(source="material.nombre", read_only=True)
     unidad_medida = serializers.CharField(source="material.unidad_medida", read_only=True)
     subtotal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    planta_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = CotizacionItem
-        fields = ["id", "material", "material_nombre", "unidad_medida", "cantidad", "precio_unitario", "subtotal"]
+        fields = [
+            "id", "material", "material_nombre", "unidad_medida", "planta", "planta_nombre",
+            "cantidad", "precio_unitario", "subtotal",
+        ]
+
+    def get_planta_nombre(self, obj):
+        """Cae a la planta de la cotización para las líneas viejas sin planta propia."""
+        planta = obj.planta_efectiva
+        return planta.nombre if planta else None
 
 
 class CotizacionSerializer(serializers.ModelSerializer):
@@ -168,6 +193,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
     aprobado_por_username = serializers.CharField(source="aprobado_por.username", read_only=True)
     total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     tiene_orden_suministro = serializers.SerializerMethodField()
+    plantas_nombres = serializers.SerializerMethodField()
     tiene_pago = serializers.SerializerMethodField()
     pagos_rechazados = serializers.SerializerMethodField()
 
@@ -178,12 +204,16 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "planta", "planta_nombre", "estado", "aprobado_por", "aprobado_por_username",
             "fecha_aprobacion", "motivo_rechazo", "notas", "pdf_path", "items", "total",
             "creado_por", "creado_por_username", "tiene_orden_suministro",
-            "tiene_pago", "pagos_rechazados", "created_at",
+            "plantas_nombres", "tiene_pago", "pagos_rechazados", "created_at",
         ]
         read_only_fields = ["numero", "estado", "creado_por", "aprobado_por", "fecha_aprobacion", "pdf_path"]
 
     def get_tiene_orden_suministro(self, obj):
-        return hasattr(obj, "orden_suministro")
+        return obj.ordenes_suministro.exists()
+
+    def get_plantas_nombres(self, obj):
+        """Todas las plantas que despachan esta cotización, no solo la principal."""
+        return [p.nombre for p in obj.plantas]
 
     def get_tiene_pago(self, obj):
         """Solo cuenta el pago vivo — uno rechazado deja subir otro comprobante."""
@@ -211,7 +241,7 @@ class OrdenSuministroSerializer(serializers.ModelSerializer):
     planta_nombre = serializers.CharField(source="planta.nombre", read_only=True)
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True)
     cliente_nombre = serializers.CharField(source="cotizacion.solicitud.cliente.nombre", read_only=True)
-    items = CotizacionItemSerializer(source="cotizacion.items", many=True, read_only=True)
+    items = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenSuministro
@@ -221,6 +251,14 @@ class OrdenSuministroSerializer(serializers.ModelSerializer):
             "notas", "pdf_path", "items", "creado_por", "created_at",
         ]
         read_only_fields = ["numero", "creado_por", "pdf_path", "notificada_planta", "fecha_notificacion"]
+
+    def get_items(self, obj):
+        """Solo la parte que le toca despachar a esta planta."""
+        items = [
+            i for i in obj.cotizacion.items.all()
+            if i.planta_efectiva and i.planta_efectiva.id == obj.planta_id
+        ]
+        return CotizacionItemSerializer(items, many=True).data
 
 
 class DespachoItemSerializer(serializers.ModelSerializer):

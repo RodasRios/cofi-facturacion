@@ -7,7 +7,12 @@ export async function getCotizaciones(estado?: string): Promise<Cotizacion[]> {
 }
 
 export async function createCotizacion(data: {
-  solicitud: number; planta: number; notas?: string; items: { material: number; cantidad: number }[];
+  solicitud: number;
+  /** Planta por defecto: la que se usa para los ítems que no traen la suya. */
+  planta: number;
+  notas?: string;
+  /** `planta` por ítem permite repartir un material entre varias plantas. */
+  items: { material: number; cantidad: number; planta?: number }[];
 }): Promise<Cotizacion> {
   const res = await client.post("/cotizaciones/", data);
   return res.data;

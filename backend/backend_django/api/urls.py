@@ -17,6 +17,9 @@ from api.views.orden_suministro_views import (
 )
 from api.views.despacho_views import DespachoListCreateView, DespachoDetailView, DespachoPdfView
 from api.views.tablero_views import TableroView, SeguimientoListCreateView
+from api.views.solicitud_token_views import (
+    SolicitudTokenListCreateView, SolicitudTokenRevocarView, SolicitudPublicaView,
+)
 
 
 def p(route, view):
@@ -51,8 +54,13 @@ urlpatterns += p("materiales/", MaterialListCreateView.as_view())
 urlpatterns += p("cliente-tokens/<int:token_id>/", ClienteTokenRevocarView.as_view())
 urlpatterns += p("cliente-tokens/", ClienteTokenListCreateView.as_view())
 
-# Formulario público de vinculación — sin auth, el token es la credencial
+# Links de pedidos (el cliente arma sus propias solicitudes de cotización)
+urlpatterns += p("solicitud-tokens/<int:token_id>/", SolicitudTokenRevocarView.as_view())
+urlpatterns += p("solicitud-tokens/", SolicitudTokenListCreateView.as_view())
+
+# Formularios públicos — sin auth, el token es la credencial
 urlpatterns += p("publico/vinculacion/<str:token>/", VinculacionPublicaView.as_view())
+urlpatterns += p("publico/solicitud/<str:token>/", SolicitudPublicaView.as_view())
 
 # Clientes
 urlpatterns += p("clientes/<int:cliente_id>/pdf/", ClientePdfView.as_view())

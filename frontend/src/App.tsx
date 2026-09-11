@@ -3,6 +3,7 @@ import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { AppShell } from "./components/layout/AppShell";
 import { LoginPage } from "./pages/LoginPage";
 import { VinculacionPublicaPage } from "./pages/VinculacionPublicaPage";
+import { PedidoPublicoPage } from "./pages/PedidoPublicoPage";
 import { TableroPage } from "./pages/TableroPage";
 import { ClientesPage } from "./pages/ClientesPage";
 import { SolicitudesCotizacionPage } from "./pages/SolicitudesCotizacionPage";
@@ -23,6 +24,7 @@ export default function App() {
 
       {/* Pública: el cliente entra por el link que le manda el comercial, sin usuario */}
       <Route path="/vincular/:token" element={<VinculacionPublicaPage />} />
+      <Route path="/pedir/:token" element={<PedidoPublicoPage />} />
 
       <Route path="/" element={<Navigate to="/tablero" replace />} />
       <Route path="/tablero" element={<Shell><TableroPage /></Shell>} />

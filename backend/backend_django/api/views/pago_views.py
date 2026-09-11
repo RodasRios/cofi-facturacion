@@ -86,14 +86,25 @@ class PagoAprobarView(APIView):
             pago.fecha_aprobacion = timezone.now()
             pago.save(update_fields=["estado", "aprobado_por", "fecha_aprobacion"])
 
-            if not hasattr(pago.cotizacion, "orden_suministro"):
-                OrdenSuministro.objects.create(
-                    numero=_numero_orden(), cotizacion=pago.cotizacion,
-                    planta=pago.cotizacion.planta, creado_por=request.user,
+            # Una orden por planta: si la cotización se repartió entre varias,
+            # cada planta despacha lo suyo y necesita su propio formato.
+            creadas = []
+            for planta in pago.cotizacion.plantas:
+                orden, nueva = OrdenSuministro.objects.get_or_create(
+                    cotizacion=pago.cotizacion, planta=planta,
+                    defaults={"numero": _numero_orden(), "creado_por": request.user},
                 )
+                if nueva:
+                    creadas.append(orden.numero)
+
+            detalle = (
+                f"Se generaron las órdenes {', '.join(creadas)}."
+                if len(creadas) > 1
+                else (f"Se generó la orden {creadas[0]}." if creadas else "")
+            )
             Seguimiento.objects.create(
                 solicitud=pago.cotizacion.solicitud, tipo="pago_aprobado", usuario=request.user,
-                texto=f"Pago de {pago.cotizacion.numero} aprobado. Se generó la orden de suministro.",
+                texto=f"Pago de {pago.cotizacion.numero} aprobado. {detalle}".strip(),
             )
         else:
             motivo = request.data.get("motivo", "")

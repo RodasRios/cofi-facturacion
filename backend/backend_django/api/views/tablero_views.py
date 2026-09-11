@@ -53,17 +53,24 @@ def _etapa_de(solicitud):
     if pago.estado == "pendiente":
         return "pendiente_aprobacion_pago", pago.created_at
 
-    # Pago aprobado: ya existe la orden de suministro.
-    orden = getattr(cot, "orden_suministro", None)
-    if orden is None:
+    # Pago aprobado: ya existen las órdenes de suministro (una por planta si la
+    # cotización se repartió). La solicitud avanza al ritmo de la más atrasada.
+    ordenes = list(cot.ordenes_suministro.all())
+    if not ordenes:
         return "pendiente_aprobacion_pago", pago.created_at
-    if not orden.notificada_planta:
-        return "pendiente_notificacion", orden.created_at
 
-    despachos = list(orden.despachos.all())
-    if not despachos:
-        return "pendiente_despacho", (orden.fecha_notificacion or orden.created_at)
-    return "despachada", max(d.created_at for d in despachos)
+    sin_notificar = [o for o in ordenes if not o.notificada_planta]
+    if sin_notificar:
+        return "pendiente_notificacion", min(o.created_at for o in sin_notificar)
+
+    sin_despachar = [o for o in ordenes if not o.despachos.all()]
+    if sin_despachar:
+        return "pendiente_despacho", min(
+            (o.fecha_notificacion or o.created_at) for o in sin_despachar
+        )
+
+    ultimo = max(d.created_at for o in ordenes for d in o.despachos.all())
+    return "despachada", ultimo
 
 
 class TableroView(APIView):
@@ -74,8 +81,9 @@ class TableroView(APIView):
             SolicitudCotizacion.objects
             .select_related("cliente")
             .prefetch_related(
+                "cotizaciones__items__planta",
                 "cotizaciones__pagos",
-                "cotizaciones__orden_suministro__despachos",
+                "cotizaciones__ordenes_suministro__despachos",
             )
         )
 

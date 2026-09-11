@@ -7,6 +7,8 @@ import { getPlantas } from "../api/plantas";
 import { useAuth } from "../contexts/AuthContext";
 import { Icon } from "../components/ui/Icon";
 import { PdfViewerModal } from "../components/ui/PdfViewerModal";
+import { RepartoPlantas } from "../components/RepartoPlantas";
+import { repartoInicial, repartoValido, repartoAItems, type Reparto } from "../lib/reparto";
 import type { CotizacionEstado } from "../types";
 
 const ESTADO_LABEL: Record<CotizacionEstado, string> = {
@@ -43,10 +45,22 @@ export function CotizacionesPage() {
 
   const solicitudSel = useMemo(() => solicitudes.find(s => String(s.id) === solicitudId), [solicitudes, solicitudId]);
 
+  // Reparto de cada material entre plantas. Arranca con todo en la planta
+  // principal; el comercial lo parte si hace falta.
+  const [reparto, setReparto] = useState<Reparto>({});
+  const [repartoBase, setRepartoBase] = useState("");
+  const baseActual = `${solicitudId}|${plantaId}`;
+  if (baseActual !== repartoBase) {
+    setRepartoBase(baseActual);
+    setReparto(solicitudSel ? repartoInicial(solicitudSel.items, plantaId) : {});
+  }
+
+  const repartoOk = !!solicitudSel && repartoValido(solicitudSel.items, reparto);
+
   const createMut = useMutation({
     mutationFn: () => createCotizacion({
       solicitud: Number(solicitudId), planta: Number(plantaId), notas,
-      items: (solicitudSel?.items ?? []).map(i => ({ material: i.material, cantidad: Number(i.cantidad) })),
+      items: repartoAItems(reparto),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cotizaciones"] });
@@ -90,7 +104,7 @@ export function CotizacionesPage() {
               </select>
             </div>
             <div>
-              <label className="section-label">Planta *</label>
+              <label className="section-label">Planta principal *</label>
               <select className="input-base" style={{ width: "100%" }} value={plantaId} onChange={e => setPlantaId(e.target.value)} required>
                 <option value="">Selecciona una planta</option>
                 {plantas?.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
@@ -98,9 +112,17 @@ export function CotizacionesPage() {
             </div>
           </div>
 
-          {solicitudSel && (
-            <div style={{ marginBottom: 12, fontSize: 12, color: "var(--text-secondary)" }}>
-              Materiales: {solicitudSel.items.map(i => `${i.material_nombre} (${i.cantidad} ${i.unidad_medida})`).join(", ")}
+          {solicitudSel && plantaId && (
+            <RepartoPlantas
+              items={solicitudSel.items}
+              plantas={plantas ?? []}
+              reparto={reparto}
+              onChange={setReparto}
+            />
+          )}
+          {solicitudSel && !plantaId && (
+            <div style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+              Elige la planta principal para repartir los materiales.
             </div>
           )}
 
@@ -110,7 +132,7 @@ export function CotizacionesPage() {
           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" className="btn-primary" disabled={createMut.isPending || !solicitudSel}>Generar</button>
+            <button type="submit" className="btn-primary" disabled={createMut.isPending || !repartoOk}>Generar</button>
             <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancelar</button>
           </div>
         </form>
@@ -134,7 +156,11 @@ export function CotizacionesPage() {
               <tr key={c.id}>
                 <td>{c.numero}</td>
                 <td>{c.cliente_nombre}</td>
-                <td>{c.planta_nombre}</td>
+                <td>
+                  {c.plantas_nombres.length > 1
+                    ? <span title={c.plantas_nombres.join(", ")}>{c.plantas_nombres.length} plantas</span>
+                    : (c.plantas_nombres[0] ?? c.planta_nombre ?? "-")}
+                </td>
                 <td>$ {Number(c.total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
                 <td>
                   <span className="badge" style={{ background: `${ESTADO_COLOR[c.estado]}22`, color: ESTADO_COLOR[c.estado] }}>

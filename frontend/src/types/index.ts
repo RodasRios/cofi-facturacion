@@ -118,6 +118,21 @@ export interface Seguimiento {
   created_at: string;
 }
 
+export interface SolicitudToken {
+  id: number;
+  token: string;
+  cliente: number;
+  cliente_nombre: string;
+  estado: "activo" | "vencido" | "revocado";
+  activo: boolean;
+  expira_at: string | null;
+  usos: number;
+  ultimo_uso_at: string | null;
+  creado_por: number | null;
+  creado_por_username: string | null;
+  created_at: string;
+}
+
 export interface SolicitudCotizacionItem {
   id: number;
   material: number;
@@ -148,6 +163,8 @@ export interface CotizacionItem {
   material: number;
   material_nombre: string;
   unidad_medida: string;
+  planta: number | null;
+  planta_nombre: string | null;
   cantidad: string;
   precio_unitario: string;
   subtotal: string;
@@ -161,8 +178,10 @@ export interface Cotizacion {
   solicitud: number;
   solicitud_numero: string;
   cliente_nombre: string;
-  planta: number;
-  planta_nombre: string;
+  planta: number | null;
+  planta_nombre: string | null;
+  /** Todas las plantas que despachan esta cotización, no solo la principal. */
+  plantas_nombres: string[];
   estado: CotizacionEstado;
   aprobado_por: number | null;
   aprobado_por_username: string | null;

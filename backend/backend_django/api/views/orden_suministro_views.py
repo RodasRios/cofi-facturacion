@@ -14,13 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 def _pdf_items(orden):
+    # Solo lo que despacha ESTA planta: si la cotización se repartió entre
+    # varias, cada orden lleva únicamente su parte.
     return [
         {
             "material_nombre": i.material.nombre,
             "cantidad": i.cantidad,
             "unidad_medida": i.material.unidad_medida,
         }
-        for i in orden.cotizacion.items.select_related("material")
+        for i in orden.cotizacion.items.select_related("material", "planta")
+        if i.planta_efectiva and i.planta_efectiva.id == orden.planta_id
     ]
 
 
@@ -41,7 +44,13 @@ def _generar_pdf(orden):
 
 class OrdenSuministroListView(APIView):
     def get(self, request):
-        ordenes = OrdenSuministro.objects.select_related("planta", "cotizacion__solicitud__cliente")
+        ordenes = (
+            OrdenSuministro.objects
+            .select_related("planta", "cotizacion__planta", "cotizacion__solicitud__cliente")
+            # get_items recorre los ítems de la cotización para quedarse con los
+            # de esta planta; sin esto sería una consulta por orden.
+            .prefetch_related("cotizacion__items__material", "cotizacion__items__planta")
+        )
         planta_id = request.query_params.get("planta")
         if planta_id:
             ordenes = ordenes.filter(planta_id=planta_id)

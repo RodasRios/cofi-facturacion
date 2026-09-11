@@ -82,11 +82,47 @@ anterior.
 - Cada rechazo, aprobación y nueva cotización escribe un `Seguimiento`
   automático; las notas manuales las agrega el comercial desde el tablero.
 
+### Reparto por planta (multi-planta)
+
+La planta está en el **ítem**, no en la cotización. `CotizacionItem.planta`
+permite que un mismo material aparezca en varias líneas con plantas distintas
+(60 m³ de una, 40 de otra), y el `precio_unitario` de cada línea sale del
+`MaterialPlanta` de **su** planta — repartir entre plantas con precios
+distintos cobra lo correcto en cada una.
+
+- `Cotizacion.planta` sigue existiendo pero es solo la **planta por defecto**
+  (la preseleccionada al armar). Nunca la uses como "la planta" de la
+  cotización: usa `Cotizacion.plantas` o `CotizacionItem.planta_efectiva`,
+  que cae a la de la cotización para las líneas anteriores a este cambio.
+- Al aprobar el pago se emite **una `OrdenSuministro` por planta**, cada una
+  con solo sus ítems, su `numero` y su PDF — porque cada planta despacha por
+  su cuenta. `unique_together (cotizacion, planta)` impide duplicarlas.
+- El porcentaje del reparto **no se guarda**: se calcula desde las cantidades
+  (`frontend/src/lib/reparto.ts`). Guardarlo sería un dato que puede quedar
+  en contra de las cantidades.
+- El frontend exige que el reparto de cada material sume exactamente lo pedido
+  antes de dejar generar la cotización.
+
+### Link de pedidos (`SolicitudToken`)
+
+El cliente arma sus propias solicitudes de cotización desde `/pedir/<token>`,
+sin usuario. A diferencia del link de vinculación, este es **permanente y
+multiuso**: es la puerta de ese cliente, se genera una vez desde el ícono del
+carrito en Clientes y él la conserva. `POST /solicitud-tokens/` devuelve el
+link vivo que ya tenga el cliente (200) en vez de crear otro (201), para no
+acumular links equivalentes.
+
+El catálogo público va **sin precios** — el cliente pide materiales y
+cantidades; la cotización, con planta y precio, la arma la empresa después.
+Las solicitudes creadas así se atribuyen a quien generó el link, para que
+tengan dueño en el sistema.
+
 ### Tablero de seguimiento
 
 `api/views/tablero_views.py` calcula en qué etapa va cada solicitud **sin
 guardar nada**: `_etapa_de()` la deduce del estado de los documentos colgados de
-la solicitud. No hay campo `etapa` que pueda quedar desincronizado. Si se agrega
+la solicitud. Con varias órdenes (una por planta), la solicitud avanza al ritmo
+de la más atrasada: sigue "por notificar" mientras quede una planta sin avisar. No hay campo `etapa` que pueda quedar desincronizado. Si se agrega
 un paso al flujo, se agrega ahí y en el diccionario `ETAPAS` (que también dice
 qué rol tiene la pelota en cada etapa).
 
@@ -160,13 +196,15 @@ Planta
   └── MaterialPlanta (precio_unitario por planta) → Material
 
 Cliente
+  ├── ClienteToken     (link de vinculación: un solo uso, 3 días)
+  ├── SolicitudToken   (link de pedidos: permanente, multiuso, revocable)
   └── SolicitudCotizacion
         ├── SolicitudCotizacionItem → Material
         ├── Seguimiento  (bitácora de la solicitud: rechazos, aprobaciones y notas del comercial)
         └── Cotizacion  (FK, NO 1:1 — planta elegida aquí, fija de qué MaterialPlanta se toma el precio)
-              ├── CotizacionItem → Material  (precio_unitario es una FOTO tomada de MaterialPlanta al crear la cotización — no vuelve a mirar el precio actual)
+              ├── CotizacionItem → Material + Planta  (precio_unitario es una FOTO tomada del MaterialPlanta de ESA planta al crear la cotización — no vuelve a mirar el precio actual)
               ├── Pago  (FK, NO 1:1)
-              └── OrdenSuministro  (1:1 con Cotizacion; se crea automáticamente al aprobar el Pago — no hay endpoint de creación manual)
+              └── OrdenSuministro  (FK, NO 1:1 — UNA POR PLANTA; se crean automáticamente al aprobar el Pago, no hay endpoint de creación manual)
                     └── Despacho  (FK a OrdenSuministro, no 1:1 — una orden puede tener varios despachos parciales)
                           └── DespachoItem → Material
 ```

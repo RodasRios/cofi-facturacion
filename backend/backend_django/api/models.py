@@ -233,7 +233,12 @@ class Cotizacion(models.Model):
     # cotización sobre la misma (la flecha "No → SEGUIMIENTO CLIENTE → FORMATO
     # COTIZACIÓN" del flujo). Solo una puede estar sin rechazar a la vez.
     solicitud = models.ForeignKey(SolicitudCotizacion, on_delete=models.CASCADE, related_name="cotizaciones")
-    planta = models.ForeignKey(Planta, on_delete=models.PROTECT, related_name="cotizaciones")
+    # Planta por defecto de la cotización. La planta de verdad vive en cada
+    # CotizacionItem: una cotización puede repartirse entre varias plantas y
+    # entonces esto es solo la que se preseleccionó al armarla.
+    planta = models.ForeignKey(
+        Planta, on_delete=models.PROTECT, related_name="cotizaciones", null=True, blank=True,
+    )
     estado = models.CharField(max_length=25, choices=COTIZACION_ESTADO_CHOICES, default="pendiente_aprobacion")
     aprobado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="cotizaciones_aprobadas")
     fecha_aprobacion = models.DateTimeField(null=True, blank=True)
@@ -255,6 +260,17 @@ class Cotizacion(models.Model):
         return sum((i.subtotal for i in self.items.all()), Decimal("0"))
 
     @property
+    def plantas(self):
+        """Las plantas que despachan esta cotización, sin repetir y en orden."""
+        vistas, out = set(), []
+        for i in self.items.all():
+            p = i.planta or self.planta
+            if p and p.id not in vistas:
+                vistas.add(p.id)
+                out.append(p)
+        return out
+
+    @property
     def pago_vigente(self):
         """El pago que sigue en juego, ignorando los rechazados.
 
@@ -265,8 +281,21 @@ class Cotizacion(models.Model):
 
 
 class CotizacionItem(models.Model):
+    """Una línea de cotización: material, cantidad y **de qué planta sale**.
+
+    Un mismo material puede aparecer en varias líneas con plantas distintas
+    para repartir la cantidad entre ellas (p. ej. 60 m³ de una planta y 40 de
+    otra). El ``precio_unitario`` es la foto del `MaterialPlanta` de **esa**
+    planta al momento de armar la cotización, así que repartir entre plantas
+    con precios distintos da el precio correcto en cada línea.
+    """
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name="items")
     material = models.ForeignKey(Material, on_delete=models.PROTECT)
+    # null solo por las líneas viejas, anteriores al reparto por planta;
+    # léelas siempre con `item.planta or item.cotizacion.planta`.
+    planta = models.ForeignKey(
+        Planta, on_delete=models.PROTECT, related_name="cotizacion_items", null=True, blank=True,
+    )
     cantidad = models.DecimalField(max_digits=14, decimal_places=2)
     precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
 
@@ -276,6 +305,10 @@ class CotizacionItem(models.Model):
     @property
     def subtotal(self) -> Decimal:
         return self.cantidad * self.precio_unitario
+
+    @property
+    def planta_efectiva(self):
+        return self.planta or self.cotizacion.planta
 
 
 PAGO_ESTADO_CHOICES = [
@@ -304,6 +337,44 @@ class Pago(models.Model):
 
     def __str__(self):
         return f"Pago {self.cotizacion.numero}"
+
+
+class SolicitudToken(models.Model):
+    """Link permanente para que un cliente pida cotizaciones por su cuenta.
+
+    A diferencia de ``ClienteToken`` (vinculación, un solo uso y 3 días), este
+    es del cliente ya vinculado y sirve **muchas veces**: es su "link de
+    pedidos", el que se guarda y usa cada vez que necesita material. Cada envío
+    crea una ``SolicitudCotizacion`` pendiente, que es donde arranca el flujo.
+    """
+    token = models.CharField(max_length=64, unique=True, db_index=True, default=_generar_token)
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name="tokens_solicitud")
+    activo = models.BooleanField(default=True)
+    # Sin fecha = no vence. Es un link que el cliente conserva.
+    expira_at = models.DateTimeField(null=True, blank=True)
+    usos = models.PositiveIntegerField(default=0)
+    ultimo_uso_at = models.DateTimeField(null=True, blank=True)
+    creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="tokens_solicitud_creados")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "solicitud_tokens"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Link de pedidos de {self.cliente.nombre}"
+
+    @property
+    def estado(self):
+        if not self.activo:
+            return "revocado"
+        if self.expira_at and timezone.now() >= self.expira_at:
+            return "vencido"
+        return "activo"
+
+    @property
+    def utilizable(self):
+        return self.estado == "activo"
 
 
 SEGUIMIENTO_TIPO_CHOICES = [
@@ -339,7 +410,9 @@ class Seguimiento(models.Model):
 
 class OrdenSuministro(models.Model):
     numero = models.CharField(max_length=50, unique=True)
-    cotizacion = models.OneToOneField(Cotizacion, on_delete=models.CASCADE, related_name="orden_suministro")
+    # FK y no 1:1: si la cotización se reparte entre varias plantas, se emite
+    # una orden por planta, porque cada planta despacha lo suyo por su cuenta.
+    cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name="ordenes_suministro")
     planta = models.ForeignKey(Planta, on_delete=models.PROTECT, related_name="ordenes_suministro")
     notificada_planta = models.BooleanField(default=False)
     fecha_notificacion = models.DateTimeField(null=True, blank=True)
@@ -351,6 +424,9 @@ class OrdenSuministro(models.Model):
     class Meta:
         db_table = "ordenes_suministro"
         ordering = ["-created_at"]
+        # Una sola orden por cotización y planta — evita duplicarlas si el
+        # pago se aprobara dos veces.
+        unique_together = [["cotizacion", "planta"]]
 
     def __str__(self):
         return self.numero

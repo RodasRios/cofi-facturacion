@@ -5,6 +5,7 @@ import { getClientes, createCliente, marcarVinculado } from "../api/clientes";
 import { Icon } from "../components/ui/Icon";
 import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 import { LinksVinculacion } from "../components/LinksVinculacion";
+import { crearSolicitudToken, urlPedidos } from "../api/solicitudTokens";
 import { useAuth } from "../contexts/AuthContext";
 
 export function ClientesPage() {
@@ -33,6 +34,21 @@ export function ClientesPage() {
       setNombre(""); setNit(""); setTelefono(""); setEmail(""); setDireccion("");
     },
     onError: () => toast.error("No se pudo crear el cliente"),
+  });
+
+  // Link de pedidos del cliente: uno solo por cliente, se reutiliza si ya existe.
+  const linkPedidosMut = useMutation({
+    mutationFn: (clienteId: number) => crearSolicitudToken(clienteId),
+    onSuccess: async (t) => {
+      const url = urlPedidos(t.token);
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Link de pedidos copiado — envíaselo al cliente");
+      } catch {
+        toast.error(`Cópialo manualmente: ${url}`);
+      }
+    },
+    onError: () => toast.error("No se pudo generar el link de pedidos"),
   });
 
   const vincularMut = useMutation({
@@ -134,6 +150,12 @@ export function ClientesPage() {
                       <button className="btn-ghost" title="Ver formato de vinculación"
                         onClick={() => setPdfViewer({ url: `/clientes/${c.id}/pdf/`, filename: `${c.numero_vinculacion}.pdf` })}>
                         <Icon name="picture_as_pdf" size={16} />
+                      </button>
+                    )}
+                    {puedeGenerarLinks && (
+                      <button className="btn-ghost" title="Copiar link para que el cliente pida cotizaciones"
+                        onClick={() => linkPedidosMut.mutate(c.id)} disabled={linkPedidosMut.isPending}>
+                        <Icon name="shopping_cart" size={16} />
                       </button>
                     )}
                     {!c.vinculado && (

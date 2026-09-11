@@ -79,6 +79,7 @@ REST_FRAMEWORK = {
     # El formulario público de vinculación no pide login, así que se limita por IP.
     "DEFAULT_THROTTLE_RATES": {
         "vinculacion_publica": "20/hour",
+        "solicitud_publica": "30/hour",
     },
 }
 

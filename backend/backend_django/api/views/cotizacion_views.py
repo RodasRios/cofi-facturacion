@@ -70,6 +70,7 @@ class CotizacionListCreateView(APIView):
         solicitud = SolicitudCotizacion.objects.filter(id=solicitud_id).first()
         if not solicitud:
             return Response({"detail": "Solicitud no encontrada"}, status=404)
+
         # Las rechazadas no cuentan: la gracia es poder volver a cotizar.
         vigente = solicitud.cotizacion_vigente
         if vigente:
@@ -90,9 +91,20 @@ class CotizacionListCreateView(APIView):
             material = Material.objects.filter(id=it.get("material")).first()
             if not material:
                 continue
-            precio = MaterialPlanta.objects.filter(material=material, planta=planta).first()
+            # Cada línea puede salir de una planta distinta; sin "planta" en el
+            # ítem se usa la de la cotización (comportamiento de siempre).
+            planta_item = planta
+            if it.get("planta"):
+                p = Planta.objects.filter(id=it["planta"]).first()
+                if not p:
+                    return Response({"detail": f"Planta {it['planta']} no encontrada"}, status=404)
+                planta_item = p
+            # El precio es el de ESA planta: repartir entre plantas con precios
+            # distintos tiene que dar el precio correcto en cada línea.
+            precio = MaterialPlanta.objects.filter(material=material, planta=planta_item).first()
             CotizacionItem.objects.create(
-                cotizacion=cotizacion, material=material, cantidad=it.get("cantidad") or 0,
+                cotizacion=cotizacion, material=material, planta=planta_item,
+                cantidad=it.get("cantidad") or 0,
                 precio_unitario=(precio.precio_unitario if precio else (it.get("precio_unitario") or 0)),
             )
 
