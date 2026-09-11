@@ -9,7 +9,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
 DEBUG = os.environ.get("DEBUG", "True") == "True"
-ALLOWED_HOSTS = ["*"]
+
+
+def _lista_env(nombre, por_defecto=""):
+    """Lee una variable de entorno separada por comas y la devuelve como lista."""
+    return [v.strip() for v in os.environ.get(nombre, por_defecto).split(",") if v.strip()]
+
+
+# En local (DEBUG=True) se acepta cualquier host; en producción hay que declarar
+# los dominios reales en ALLOWED_HOSTS del .env.
+ALLOWED_HOSTS = ["*"] if DEBUG else _lista_env("ALLOWED_HOSTS", "localhost,127.0.0.1")
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
@@ -77,8 +86,20 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # Detrás de nginx el frontend se sirve en el mismo origen que /api, así que
+    # normalmente esta lista puede quedar vacía.
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS")
+
+# nginx termina el TLS y reenvía por http, así que Django necesita esta cabecera
+# para saber que la petición original venía por https.
+CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 
 TEMPLATES = [
     {

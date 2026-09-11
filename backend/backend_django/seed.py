@@ -30,9 +30,13 @@ MATERIALES = [
 def run():
     if not User.objects.filter(username="admin").exists():
         admin = User(username="admin", email="admin@cofi-facturacion.local", nombre="Administrador", rol="comercial", is_admin=True)
-        admin.set_password("admin123")
+        password = os.environ.get("ADMIN_PASSWORD", "admin123")
+        admin.set_password(password)
         admin.save()
-        print("Usuario admin creado (admin / admin123) — cambia la contraseña en producción.")
+        if password == "admin123":
+            print("Usuario admin creado (admin / admin123) — cambia la contraseña en producción.")
+        else:
+            print("Usuario admin creado con la contraseña de ADMIN_PASSWORD.")
 
     plantas = {}
     for p in PLANTAS:

@@ -11,10 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 COPY . .
 
+RUN chmod +x entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["sh", "-c", \
-    "python manage.py makemigrations api --noinput && \
-     python manage.py migrate --noinput && \
-     python seed.py && \
-     gunicorn facturacion.wsgi:application --bind 0.0.0.0:8000 --workers 2"]
+CMD ["./entrypoint.sh"]

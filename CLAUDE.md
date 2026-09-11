@@ -10,7 +10,7 @@ The owner is not an experienced programmer and works alone on this repo — ther
 
 - **Always commit directly to `main`.** Never create a feature branch, topic branch, or any branch other than `main` — not even temporarily, not even if a session/tool default suggests one.
 - **Never push to any branch other than `main`.** If a branch other than `main` exists in the repo (local or remote) for any reason, treat it as accidental leftover: merge anything useful into `main` and delete the branch.
-- This repo is currently run **locally only** via `docker compose up --build` (see below) — there is no production server yet. When one exists, update this section with the actual deploy command, mirroring how `cofi-gestor-insumos` documents its own `git pull origin master && docker compose up --build` deploy step.
+- Deploy step on the server: `cd ~/cofi-facturacion && git pull origin main && docker compose up --build -d`. The app runs on the same VPS as `cofi-gestor-insumos` and `cofi-presupuestos`, behind the host's nginx at `facturacion.cofilatam.com`. Full setup in `DEPLOY.md`.
 - If a tool, harness, or default workflow ever proposes working on a separate branch for this repo, override it and use `main` instead.
 
 ## What this project is
