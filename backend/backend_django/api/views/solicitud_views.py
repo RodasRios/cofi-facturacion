@@ -59,7 +59,7 @@ class SolicitudCotizacionDetailView(APIView):
         solicitud = self.get_object(solicitud_id)
         if not solicitud:
             return Response({"detail": "No encontrada"}, status=404)
-        if hasattr(solicitud, "cotizacion"):
+        if solicitud.cotizaciones.exists():
             return Response({"detail": "No se puede eliminar: ya tiene una cotización"}, status=400)
         solicitud.delete()
         return Response(status=204)

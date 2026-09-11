@@ -18,10 +18,12 @@ export function PagosPage() {
 
   const puedeAprobar = user?.is_admin || user?.rol === "financiera";
 
-  const cotizacionesSinPago = useMemo(() => {
-    const conPago = new Set((pagos ?? []).map(p => p.cotizacion));
-    return (cotizaciones ?? []).filter(c => !conPago.has(c.id));
-  }, [cotizaciones, pagos]);
+  // tiene_pago ignora los pagos rechazados: si financiera rechazó el
+  // comprobante, la cotización vuelve a aparecer para registrar otro.
+  const cotizacionesSinPago = useMemo(
+    () => (cotizaciones ?? []).filter(c => !c.tiene_pago),
+    [cotizaciones],
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [cotizacionId, setCotizacionId] = useState("");
@@ -30,6 +32,8 @@ export function PagosPage() {
     mutationFn: () => createPago({ cotizacion: Number(cotizacionId) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pagos"] });
+      qc.invalidateQueries({ queryKey: ["cotizaciones"] });
+      qc.invalidateQueries({ queryKey: ["tablero"] });
       toast.success("Pago registrado — pendiente de comprobante y aprobación");
       setShowForm(false);
       setCotizacionId("");
@@ -39,13 +43,17 @@ export function PagosPage() {
 
   const comprobanteMut = useMutation({
     mutationFn: ({ id, file }: { id: number; file: File }) => uploadComprobante(id, file),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["pagos"] }); toast.success("Comprobante cargado"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["pagos"] });
+      qc.invalidateQueries({ queryKey: ["cotizaciones"] });
+      qc.invalidateQueries({ queryKey: ["tablero"] }); toast.success("Comprobante cargado"); },
     onError: () => toast.error("No se pudo cargar el comprobante"),
   });
 
   const aprobarMut = useMutation({
     mutationFn: ({ id, aprobar }: { id: number; aprobar: boolean }) => aprobarPago(id, aprobar),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["pagos"] }); toast.success("Pago actualizado"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["pagos"] });
+      qc.invalidateQueries({ queryKey: ["cotizaciones"] });
+      qc.invalidateQueries({ queryKey: ["tablero"] }); toast.success("Pago actualizado"); },
     onError: () => toast.error("No se pudo actualizar el pago"),
   });
 

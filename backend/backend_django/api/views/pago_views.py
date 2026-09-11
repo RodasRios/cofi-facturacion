@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
-from api.models import Pago, Cotizacion, OrdenSuministro
+from api.models import Pago, Cotizacion, OrdenSuministro, Seguimiento
 from api.serializers import PagoSerializer
 from api.permissions import IsFinanciera
 
@@ -33,8 +33,9 @@ class PagoListCreateView(APIView):
             return Response({"detail": "Cotización no encontrada"}, status=404)
         if cotizacion.estado != "aprobada":
             return Response({"detail": "La cotización debe estar aprobada antes de registrar el pago"}, status=400)
-        if hasattr(cotizacion, "pago"):
-            return Response({"detail": "Esta cotización ya tiene un pago registrado"}, status=400)
+        # Los rechazados no cuentan: el comercial puede subir otro comprobante.
+        if cotizacion.pago_vigente:
+            return Response({"detail": "Esta cotización ya tiene un pago en curso"}, status=400)
 
         pago = Pago.objects.create(
             cotizacion=cotizacion, monto=d.get("monto") or cotizacion.total, creado_por=request.user,
@@ -90,12 +91,24 @@ class PagoAprobarView(APIView):
                     numero=_numero_orden(), cotizacion=pago.cotizacion,
                     planta=pago.cotizacion.planta, creado_por=request.user,
                 )
+            Seguimiento.objects.create(
+                solicitud=pago.cotizacion.solicitud, tipo="pago_aprobado", usuario=request.user,
+                texto=f"Pago de {pago.cotizacion.numero} aprobado. Se generó la orden de suministro.",
+            )
         else:
+            motivo = request.data.get("motivo", "")
             pago.estado = "rechazado"
-            pago.motivo_rechazo = request.data.get("motivo", "")
+            pago.motivo_rechazo = motivo
             pago.aprobado_por = request.user
             pago.fecha_aprobacion = timezone.now()
             pago.save(update_fields=["estado", "motivo_rechazo", "aprobado_por", "fecha_aprobacion"])
+
+            # Vuelve al comercial para que registre otro comprobante sobre la
+            # misma cotización: la segunda flecha "No → SEGUIMIENTO CLIENTE".
+            Seguimiento.objects.create(
+                solicitud=pago.cotizacion.solicitud, tipo="pago_rechazado", usuario=request.user,
+                texto=f"Pago de {pago.cotizacion.numero} rechazado." + (f" Motivo: {motivo}" if motivo else ""),
+            )
 
         pago.refresh_from_db()
         return Response(PagoSerializer(pago).data)

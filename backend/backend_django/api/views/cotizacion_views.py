@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from api.models import (
     Cotizacion, CotizacionItem, SolicitudCotizacion, Planta, Material, MaterialPlanta,
+    Seguimiento,
 )
 from api.serializers import CotizacionSerializer
 from api.permissions import IsAprobador
@@ -69,8 +70,14 @@ class CotizacionListCreateView(APIView):
         solicitud = SolicitudCotizacion.objects.filter(id=solicitud_id).first()
         if not solicitud:
             return Response({"detail": "Solicitud no encontrada"}, status=404)
-        if hasattr(solicitud, "cotizacion"):
-            return Response({"detail": "Esta solicitud ya tiene una cotización"}, status=400)
+        # Las rechazadas no cuentan: la gracia es poder volver a cotizar.
+        vigente = solicitud.cotizacion_vigente
+        if vigente:
+            return Response(
+                {"detail": f"Esta solicitud ya tiene la cotización {vigente.numero} en curso"},
+                status=400,
+            )
+        es_reintento = solicitud.cotizaciones.exists()
         planta = Planta.objects.filter(id=planta_id).first()
         if not planta:
             return Response({"detail": "Planta no encontrada"}, status=404)
@@ -91,6 +98,12 @@ class CotizacionListCreateView(APIView):
 
         solicitud.estado = "cotizada"
         solicitud.save(update_fields=["estado"])
+
+        if es_reintento:
+            Seguimiento.objects.create(
+                solicitud=solicitud, tipo="cotizacion_nueva", usuario=request.user,
+                texto=f"Se armó la cotización {cotizacion.numero} tras el rechazo anterior.",
+            )
 
         cotizacion.refresh_from_db()
         _generar_pdf(cotizacion)
@@ -126,12 +139,27 @@ class CotizacionAprobarView(APIView):
             cotizacion.fecha_aprobacion = timezone.now()
             cotizacion.save(update_fields=["estado", "aprobado_por", "fecha_aprobacion"])
             _generar_pdf(cotizacion, firma_path=request.user.firma_path)
+            Seguimiento.objects.create(
+                solicitud=cotizacion.solicitud, tipo="cotizacion_aprobada", usuario=request.user,
+                texto=f"{cotizacion.numero} aprobada.",
+            )
         else:
+            motivo = request.data.get("motivo", "")
             cotizacion.estado = "rechazada"
-            cotizacion.motivo_rechazo = request.data.get("motivo", "")
+            cotizacion.motivo_rechazo = motivo
             cotizacion.aprobado_por = request.user
             cotizacion.fecha_aprobacion = timezone.now()
             cotizacion.save(update_fields=["estado", "motivo_rechazo", "aprobado_por", "fecha_aprobacion"])
+
+            # La solicitud vuelve a manos del comercial para que arme otra
+            # cotización: es la flecha "No → SEGUIMIENTO CLIENTE" del flujo.
+            solicitud = cotizacion.solicitud
+            solicitud.estado = "en_seguimiento"
+            solicitud.save(update_fields=["estado"])
+            Seguimiento.objects.create(
+                solicitud=solicitud, tipo="cotizacion_rechazada", usuario=request.user,
+                texto=f"{cotizacion.numero} rechazada." + (f" Motivo: {motivo}" if motivo else ""),
+            )
 
         cotizacion.refresh_from_db()
         return Response(CotizacionSerializer(cotizacion).data)

@@ -24,7 +24,13 @@ export function CotizacionesPage() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const { data: cotizaciones, isLoading } = useQuery({ queryKey: ["cotizaciones"], queryFn: () => getCotizaciones() });
-  const { data: solicitudes } = useQuery({ queryKey: ["solicitudes"], queryFn: () => getSolicitudes("pendiente") });
+  // Sin filtrar por estado: una solicitud rechazada queda "en_seguimiento" y
+  // también se puede volver a cotizar. Lo que manda es no tener cotización viva.
+  const { data: todasSolicitudes } = useQuery({ queryKey: ["solicitudes"], queryFn: () => getSolicitudes() });
+  const solicitudes = useMemo(
+    () => (todasSolicitudes ?? []).filter(s => !s.tiene_cotizacion && s.estado !== "cerrada"),
+    [todasSolicitudes],
+  );
   const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: getPlantas });
 
   const puedeAprobar = user?.is_admin || user?.rol === "aprobador";
@@ -35,7 +41,7 @@ export function CotizacionesPage() {
   const [plantaId, setPlantaId] = useState("");
   const [notas, setNotas] = useState("");
 
-  const solicitudSel = useMemo(() => solicitudes?.find(s => String(s.id) === solicitudId), [solicitudes, solicitudId]);
+  const solicitudSel = useMemo(() => solicitudes.find(s => String(s.id) === solicitudId), [solicitudes, solicitudId]);
 
   const createMut = useMutation({
     mutationFn: () => createCotizacion({
@@ -45,6 +51,7 @@ export function CotizacionesPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cotizaciones"] });
       qc.invalidateQueries({ queryKey: ["solicitudes"] });
+      qc.invalidateQueries({ queryKey: ["tablero"] });
       toast.success("Cotización generada");
       setShowForm(false);
       setSolicitudId(""); setPlantaId(""); setNotas("");
@@ -56,6 +63,8 @@ export function CotizacionesPage() {
     mutationFn: ({ id, aprobar }: { id: number; aprobar: boolean }) => aprobarCotizacion(id, aprobar),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cotizaciones"] });
+      qc.invalidateQueries({ queryKey: ["solicitudes"] });
+      qc.invalidateQueries({ queryKey: ["tablero"] });
       toast.success("Cotización actualizada");
     },
     onError: () => toast.error("No se pudo actualizar la cotización"),
@@ -77,7 +86,7 @@ export function CotizacionesPage() {
               <label className="section-label">Solicitud pendiente *</label>
               <select className="input-base" style={{ width: "100%" }} value={solicitudId} onChange={e => setSolicitudId(e.target.value)} required>
                 <option value="">Selecciona una solicitud</option>
-                {solicitudes?.map(s => <option key={s.id} value={s.id}>{s.numero} — {s.cliente_nombre}</option>)}
+                {solicitudes.map(s => <option key={s.id} value={s.id}>{s.numero} — {s.cliente_nombre}</option>)}
               </select>
             </div>
             <div>

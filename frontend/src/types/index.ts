@@ -73,6 +73,51 @@ export interface ClienteToken {
   created_at: string;
 }
 
+export type EtapaFlujo =
+  | "pendiente_cotizacion"
+  | "en_seguimiento"
+  | "pendiente_aprobacion"
+  | "pendiente_pago"
+  | "pendiente_aprobacion_pago"
+  | "pendiente_notificacion"
+  | "pendiente_despacho"
+  | "despachada";
+
+export interface FilaTablero {
+  solicitud_id: number;
+  numero: string;
+  cliente_nombre: string;
+  etapa: EtapaFlujo;
+  etapa_titulo: string;
+  responsable: Rol | null;
+  desde: string;
+  dias_en_etapa: number;
+  cotizacion_numero: string | null;
+  total: string | null;
+  cotizaciones_rechazadas: number;
+  pagos_rechazados: number;
+  created_at: string;
+}
+
+export type SeguimientoTipo =
+  | "nota"
+  | "cotizacion_rechazada"
+  | "cotizacion_aprobada"
+  | "pago_rechazado"
+  | "pago_aprobado"
+  | "cotizacion_nueva";
+
+export interface Seguimiento {
+  id: number;
+  solicitud: number;
+  tipo: SeguimientoTipo;
+  tipo_display: string;
+  texto: string | null;
+  usuario: number | null;
+  usuario_username: string | null;
+  created_at: string;
+}
+
 export interface SolicitudCotizacionItem {
   id: number;
   material: number;
@@ -81,7 +126,7 @@ export interface SolicitudCotizacionItem {
   cantidad: string;
 }
 
-export type SolicitudEstado = "pendiente" | "cotizada" | "cerrada";
+export type SolicitudEstado = "pendiente" | "cotizada" | "en_seguimiento" | "cerrada";
 
 export interface SolicitudCotizacion {
   id: number;
@@ -94,6 +139,7 @@ export interface SolicitudCotizacion {
   creado_por: number | null;
   creado_por_username: string | null;
   tiene_cotizacion: boolean;
+  cotizaciones_rechazadas: number;
   created_at: string;
 }
 
@@ -129,6 +175,8 @@ export interface Cotizacion {
   creado_por: number | null;
   creado_por_username: string | null;
   tiene_orden_suministro: boolean;
+  tiene_pago: boolean;
+  pagos_rechazados: number;
   created_at: string;
 }
 

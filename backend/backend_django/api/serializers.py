@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     User, Planta, Material, MaterialPlanta, Cliente, ClienteToken,
     SolicitudCotizacion, SolicitudCotizacionItem,
-    Cotizacion, CotizacionItem, Pago, OrdenSuministro,
+    Cotizacion, CotizacionItem, Pago, OrdenSuministro, Seguimiento,
     Despacho, DespachoItem,
 )
 
@@ -112,22 +112,41 @@ class SolicitudCotizacionItemSerializer(serializers.ModelSerializer):
         fields = ["id", "material", "material_nombre", "unidad_medida", "cantidad"]
 
 
+class SeguimientoSerializer(serializers.ModelSerializer):
+    usuario_username = serializers.CharField(source="usuario.username", read_only=True)
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+
+    class Meta:
+        model = Seguimiento
+        fields = [
+            "id", "solicitud", "tipo", "tipo_display", "texto",
+            "usuario", "usuario_username", "created_at",
+        ]
+        read_only_fields = ["solicitud", "usuario"]
+
+
 class SolicitudCotizacionSerializer(serializers.ModelSerializer):
     items = SolicitudCotizacionItemSerializer(many=True, read_only=True)
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
     creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
     tiene_cotizacion = serializers.SerializerMethodField()
+    cotizaciones_rechazadas = serializers.SerializerMethodField()
 
     class Meta:
         model = SolicitudCotizacion
         fields = [
             "id", "numero", "cliente", "cliente_nombre", "estado", "notas",
-            "items", "creado_por", "creado_por_username", "tiene_cotizacion", "created_at",
+            "items", "creado_por", "creado_por_username", "tiene_cotizacion",
+            "cotizaciones_rechazadas", "created_at",
         ]
         read_only_fields = ["numero", "creado_por", "estado"]
 
     def get_tiene_cotizacion(self, obj):
-        return hasattr(obj, "cotizacion")
+        """Solo cuenta la cotización viva — una rechazada deja volver a cotizar."""
+        return obj.cotizacion_vigente is not None
+
+    def get_cotizaciones_rechazadas(self, obj):
+        return sum(1 for c in obj.cotizaciones.all() if c.estado == "rechazada")
 
 
 class CotizacionItemSerializer(serializers.ModelSerializer):
@@ -149,6 +168,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     aprobado_por_username = serializers.CharField(source="aprobado_por.username", read_only=True)
     total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     tiene_orden_suministro = serializers.SerializerMethodField()
+    tiene_pago = serializers.SerializerMethodField()
+    pagos_rechazados = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -156,12 +177,20 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "id", "numero", "solicitud", "solicitud_numero", "cliente_nombre",
             "planta", "planta_nombre", "estado", "aprobado_por", "aprobado_por_username",
             "fecha_aprobacion", "motivo_rechazo", "notas", "pdf_path", "items", "total",
-            "creado_por", "creado_por_username", "tiene_orden_suministro", "created_at",
+            "creado_por", "creado_por_username", "tiene_orden_suministro",
+            "tiene_pago", "pagos_rechazados", "created_at",
         ]
         read_only_fields = ["numero", "estado", "creado_por", "aprobado_por", "fecha_aprobacion", "pdf_path"]
 
     def get_tiene_orden_suministro(self, obj):
         return hasattr(obj, "orden_suministro")
+
+    def get_tiene_pago(self, obj):
+        """Solo cuenta el pago vivo — uno rechazado deja subir otro comprobante."""
+        return obj.pago_vigente is not None
+
+    def get_pagos_rechazados(self, obj):
+        return sum(1 for p in obj.pagos.all() if p.estado == "rechazado")
 
 
 class PagoSerializer(serializers.ModelSerializer):

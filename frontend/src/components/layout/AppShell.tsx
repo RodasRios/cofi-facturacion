@@ -5,6 +5,7 @@ import { Icon } from "../ui/Icon";
 import { NeuralBackground } from "../ui/NeuralBackground";
 
 const NAV_ITEMS = [
+  { path: "/tablero", icon: "dashboard", label: "Tablero" },
   { path: "/clientes", icon: "groups", label: "Clientes" },
   { path: "/solicitudes", icon: "request_quote", label: "Solicitudes" },
   { path: "/cotizaciones", icon: "description", label: "Cotizaciones" },

@@ -61,6 +61,35 @@ expone en "Nuevo cliente", y al enviarlo se crea el `Cliente` con su
 - `api/tests.py` cubre el flujo completo, el un-solo-uso, vencido/revocado y el
   gate de rol.
 
+### Reintentos: las dos flechas de "No" del flujo
+
+`Cotizacion.solicitud` y `Pago.cotizacion` son **FK, no 1:1**, y eso es
+deliberado. Cuando eran 1:1, un rechazo dejaba el caso muerto: una solicitud con
+cotización rechazada no admitía otra cotización, y una cotización con pago
+rechazado no admitía otro comprobante. El diagrama del negocio dice lo
+contrario — ambos "No" pasan por `SEGUIMIENTO CLIENTE` y **vuelven** al paso
+anterior.
+
+- Solo puede haber **una viva a la vez**: `SolicitudCotizacion.cotizacion_vigente`
+  y `Cotizacion.pago_vigente` ignoran las rechazadas y son lo que las vistas
+  consultan antes de permitir crear otra. No hay constraint en la base que lo
+  imponga; la regla vive en las vistas.
+- Rechazar una cotización deja la solicitud en `estado="en_seguimiento"`; crear
+  una nueva la devuelve a `"cotizada"`.
+- Los serializers exponen `tiene_cotizacion` / `tiene_pago` derivados de esos
+  `*_vigente`, y el frontend filtra por ellos (**no** por "tiene alguna fila
+  relacionada", que es lo que bloqueaba el reintento).
+- Cada rechazo, aprobación y nueva cotización escribe un `Seguimiento`
+  automático; las notas manuales las agrega el comercial desde el tablero.
+
+### Tablero de seguimiento
+
+`api/views/tablero_views.py` calcula en qué etapa va cada solicitud **sin
+guardar nada**: `_etapa_de()` la deduce del estado de los documentos colgados de
+la solicitud. No hay campo `etapa` que pueda quedar desincronizado. Si se agrega
+un paso al flujo, se agrega ahí y en el diccionario `ETAPAS` (que también dice
+qué rol tiene la pelota en cada etapa).
+
 ### Roles
 
 `User.rol` (plain `CharField`, not `AbstractUser`) is one of `comercial | aprobador | financiera | planta`, gating the corresponding step above via the permission classes in `api/permissions.py` (`IsComercial`, `IsAprobador`, `IsFinanciera`, `IsPlanta`). `User.is_admin` is a blanket override — `_has_rol()` in `permissions.py` lets an admin through regardless of `rol`. There is no `is_superadmin` and no TOTP/2FA in this project (both exist in `cofi-gestor-insumos` but were deliberately left out here to keep scope small).
@@ -133,9 +162,10 @@ Planta
 Cliente
   └── SolicitudCotizacion
         ├── SolicitudCotizacionItem → Material
-        └── Cotizacion  (1:1, planta elegida aquí — fija de qué MaterialPlanta se toma el precio)
+        ├── Seguimiento  (bitácora de la solicitud: rechazos, aprobaciones y notas del comercial)
+        └── Cotizacion  (FK, NO 1:1 — planta elegida aquí, fija de qué MaterialPlanta se toma el precio)
               ├── CotizacionItem → Material  (precio_unitario es una FOTO tomada de MaterialPlanta al crear la cotización — no vuelve a mirar el precio actual)
-              ├── Pago  (1:1)
+              ├── Pago  (FK, NO 1:1)
               └── OrdenSuministro  (1:1 con Cotizacion; se crea automáticamente al aprobar el Pago — no hay endpoint de creación manual)
                     └── Despacho  (FK a OrdenSuministro, no 1:1 — una orden puede tener varios despachos parciales)
                           └── DespachoItem → Material

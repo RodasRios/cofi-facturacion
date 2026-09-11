@@ -16,6 +16,7 @@ from api.views.orden_suministro_views import (
     OrdenSuministroListView, OrdenSuministroDetailView, OrdenSuministroNotificarView, OrdenSuministroPdfView,
 )
 from api.views.despacho_views import DespachoListCreateView, DespachoDetailView, DespachoPdfView
+from api.views.tablero_views import TableroView, SeguimientoListCreateView
 
 
 def p(route, view):
@@ -58,7 +59,11 @@ urlpatterns += p("clientes/<int:cliente_id>/pdf/", ClientePdfView.as_view())
 urlpatterns += p("clientes/<int:cliente_id>/", ClienteDetailView.as_view())
 urlpatterns += p("clientes/", ClienteListCreateView.as_view())
 
+# Tablero de seguimiento del flujo
+urlpatterns += p("tablero/", TableroView.as_view())
+
 # Solicitudes de cotización
+urlpatterns += p("solicitudes-cotizacion/<int:solicitud_id>/seguimientos/", SeguimientoListCreateView.as_view())
 urlpatterns += p("solicitudes-cotizacion/<int:solicitud_id>/", SolicitudCotizacionDetailView.as_view())
 urlpatterns += p("solicitudes-cotizacion/", SolicitudCotizacionListCreateView.as_view())
 

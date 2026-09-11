@@ -10,12 +10,14 @@ import type { SolicitudEstado } from "../types";
 const ESTADO_LABEL: Record<SolicitudEstado, string> = {
   pendiente: "Pendiente",
   cotizada: "Cotizada",
+  en_seguimiento: "En seguimiento",
   cerrada: "Cerrada",
 };
 
 const ESTADO_COLOR: Record<SolicitudEstado, string> = {
   pendiente: "#f59e0b",
   cotizada: "#0f6cbd",
+  en_seguimiento: "#f97316",
   cerrada: "#64748b",
 };
 

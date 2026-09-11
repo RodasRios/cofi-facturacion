@@ -178,6 +178,9 @@ class ClienteToken(models.Model):
 SOLICITUD_ESTADO_CHOICES = [
     ("pendiente", "Pendiente"),
     ("cotizada", "Cotizada"),
+    # El aprobador o financiera rechazaron algo y la solicitud volvió a manos
+    # del comercial — es la caja "SEGUIMIENTO CLIENTE" del flujo.
+    ("en_seguimiento", "En seguimiento"),
     ("cerrada", "Cerrada"),
 ]
 
@@ -196,6 +199,16 @@ class SolicitudCotizacion(models.Model):
 
     def __str__(self):
         return self.numero
+
+    @property
+    def cotizacion_vigente(self):
+        """La cotización que sigue en juego, ignorando las rechazadas.
+
+        Una solicitud puede acumular varias cotizaciones: cada rechazo del
+        aprobador manda la solicitud a seguimiento y el comercial arma una
+        nueva. Solo una puede estar viva a la vez.
+        """
+        return next((c for c in self.cotizaciones.all() if c.estado != "rechazada"), None)
 
 
 class SolicitudCotizacionItem(models.Model):
@@ -216,7 +229,10 @@ COTIZACION_ESTADO_CHOICES = [
 
 class Cotizacion(models.Model):
     numero = models.CharField(max_length=50, unique=True)
-    solicitud = models.OneToOneField(SolicitudCotizacion, on_delete=models.CASCADE, related_name="cotizacion")
+    # FK y no 1:1: un rechazo no mata la solicitud, el comercial arma otra
+    # cotización sobre la misma (la flecha "No → SEGUIMIENTO CLIENTE → FORMATO
+    # COTIZACIÓN" del flujo). Solo una puede estar sin rechazar a la vez.
+    solicitud = models.ForeignKey(SolicitudCotizacion, on_delete=models.CASCADE, related_name="cotizaciones")
     planta = models.ForeignKey(Planta, on_delete=models.PROTECT, related_name="cotizaciones")
     estado = models.CharField(max_length=25, choices=COTIZACION_ESTADO_CHOICES, default="pendiente_aprobacion")
     aprobado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="cotizaciones_aprobadas")
@@ -237,6 +253,15 @@ class Cotizacion(models.Model):
     @property
     def total(self) -> Decimal:
         return sum((i.subtotal for i in self.items.all()), Decimal("0"))
+
+    @property
+    def pago_vigente(self):
+        """El pago que sigue en juego, ignorando los rechazados.
+
+        Mismo caso que las cotizaciones: si financiera rechaza el comprobante,
+        el comercial sube otro sobre la misma cotización.
+        """
+        return next((p for p in self.pagos.all() if p.estado != "rechazado"), None)
 
 
 class CotizacionItem(models.Model):
@@ -261,7 +286,9 @@ PAGO_ESTADO_CHOICES = [
 
 
 class Pago(models.Model):
-    cotizacion = models.OneToOneField(Cotizacion, on_delete=models.CASCADE, related_name="pago")
+    # FK y no 1:1, por lo mismo que Cotizacion.solicitud: un comprobante
+    # rechazado por financiera no deja la cotización inservible.
+    cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name="pagos")
     monto = models.DecimalField(max_digits=14, decimal_places=2)
     comprobante_path = models.CharField(max_length=500, blank=True, null=True)
     estado = models.CharField(max_length=20, choices=PAGO_ESTADO_CHOICES, default="pendiente")
@@ -277,6 +304,37 @@ class Pago(models.Model):
 
     def __str__(self):
         return f"Pago {self.cotizacion.numero}"
+
+
+SEGUIMIENTO_TIPO_CHOICES = [
+    ("nota", "Nota"),
+    ("cotizacion_rechazada", "Cotización rechazada"),
+    ("cotizacion_aprobada", "Cotización aprobada"),
+    ("pago_rechazado", "Pago rechazado"),
+    ("pago_aprobado", "Pago aprobado"),
+    ("cotizacion_nueva", "Nueva cotización"),
+]
+
+
+class Seguimiento(models.Model):
+    """Bitácora de una solicitud — la caja "SEGUIMIENTO CLIENTE" del flujo.
+
+    Las entradas de rechazo y aprobación las escribe el sistema; las de tipo
+    "nota" las escribe el comercial para dejar registro de lo que habló con el
+    cliente mientras la solicitud da vueltas.
+    """
+    solicitud = models.ForeignKey(SolicitudCotizacion, on_delete=models.CASCADE, related_name="seguimientos")
+    tipo = models.CharField(max_length=30, choices=SEGUIMIENTO_TIPO_CHOICES, default="nota")
+    texto = models.TextField(blank=True, null=True)
+    usuario = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="seguimientos")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "seguimientos"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.solicitud.numero} · {self.get_tipo_display()}"
 
 
 class OrdenSuministro(models.Model):
