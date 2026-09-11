@@ -7,7 +7,12 @@ from api.permissions import IsAdmin
 
 class PlantaListCreateView(APIView):
     def get(self, request):
+        # Por defecto solo las activas: los selectores de cotización y despacho
+        # no deben ofrecer plantas dadas de baja. El panel de administración
+        # pide ?todas=1 para poder verlas y reactivarlas.
         plantas = Planta.objects.all()
+        if request.query_params.get("todas") not in ("1", "true", "True"):
+            plantas = plantas.filter(activa=True)
         return Response(PlantaSerializer(plantas, many=True).data)
 
     def post(self, request):

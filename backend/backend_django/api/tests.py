@@ -521,3 +521,33 @@ class TarifasEIvaTest(TestCase):
             planta__nombre="Planta Catarina", material__nombre="Base granular tipo INVIAS")
         self.assertIsNone(catarina.precio_detal)
         self.assertEqual(catarina.precio("detal"), Decimal("43000.00"))
+
+
+class PlantasActivasTest(TestCase):
+    """Las plantas dadas de baja no deben ofrecerse al cotizar."""
+
+    def setUp(self):
+        self.admin = User(username="adm", rol="comercial", is_admin=True)
+        self.admin.set_password("x")
+        self.admin.save()
+        Planta.objects.create(nombre="Planta Real", activa=True)
+        Planta.objects.create(nombre="Planta De Ejemplo", activa=False)
+        self.api = APIClient()
+        r = self.api.post("/api/v1/auth/login", {"username": "adm", "password": "x"}, format="json")
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def test_por_defecto_solo_activas(self):
+        r = self.api.get("/api/v1/plantas/")
+        nombres = [p["nombre"] for p in r.json()]
+        self.assertEqual(nombres, ["Planta Real"])
+
+    def test_el_admin_puede_pedirlas_todas(self):
+        r = self.api.get("/api/v1/plantas/", {"todas": 1})
+        nombres = sorted(p["nombre"] for p in r.json())
+        self.assertEqual(nombres, ["Planta De Ejemplo", "Planta Real"])
+
+    def test_se_puede_reactivar(self):
+        planta = Planta.objects.get(nombre="Planta De Ejemplo")
+        r = self.api.patch(f"/api/v1/plantas/{planta.id}/", {"activa": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(self.api.get("/api/v1/plantas/").json()), 2)

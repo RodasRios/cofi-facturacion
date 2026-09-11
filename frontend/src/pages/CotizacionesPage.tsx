@@ -33,7 +33,7 @@ export function CotizacionesPage() {
     () => (todasSolicitudes ?? []).filter(s => !s.tiene_cotizacion && s.estado !== "cerrada"),
     [todasSolicitudes],
   );
-  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: getPlantas });
+  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: () => getPlantas() });
 
   const puedeAprobar = user?.is_admin || user?.rol === "aprobador";
   const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);

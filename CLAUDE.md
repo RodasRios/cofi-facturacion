@@ -112,6 +112,11 @@ python manage.py cargar_precios                    # crea o actualiza precios
 python manage.py cargar_precios --desactivar-otros # apaga lo que no esté en la lista
 ```
 
+`GET /plantas/` devuelve **solo las activas**; el panel de administración pide
+`?todas=1` para verlas todas y poder reactivar una. Los selectores de cotización
+y despacho usan el valor por defecto, así que una planta dada de baja deja de
+ofrecerse. Lo mismo hace `GET /materiales/` con `activo`.
+
 Es idempotente — cuando cambien los precios, se editan las tablas de ese
 archivo y se vuelve a correr. Un detalle del PDF original: el MDC-25 aparece
 con unidad "M4", que se cargó como m3 por ser un error de digitación evidente.

@@ -1,18 +1,27 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getPlantas, createPlanta } from "../api/plantas";
+import { getPlantas, createPlanta, setPlantaActiva } from "../api/plantas";
 import { getMateriales, createMaterial, setPrecioMaterial } from "../api/materiales";
 import { Icon } from "../components/ui/Icon";
 import type { MaterialTipo } from "../types";
 
 export function AdminPage() {
   const qc = useQueryClient();
-  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: getPlantas });
+  const { data: plantas } = useQuery({ queryKey: ["plantas", "todas"], queryFn: () => getPlantas(true) });
   const { data: materiales } = useQuery({ queryKey: ["materiales"], queryFn: getMateriales });
 
   const [nombrePlanta, setNombrePlanta] = useState("");
   const [ubicacionPlanta, setUbicacionPlanta] = useState("");
+  const activarPlantaMut = useMutation({
+    mutationFn: ({ id, activa }: { id: number; activa: boolean }) => setPlantaActiva(id, activa),
+    onSuccess: (p) => {
+      qc.invalidateQueries({ queryKey: ["plantas"] });
+      toast.success(p.activa ? "Planta activada" : "Planta desactivada — ya no aparece al cotizar");
+    },
+    onError: () => toast.error("No se pudo actualizar la planta"),
+  });
+
   const crearPlantaMut = useMutation({
     mutationFn: () => createPlanta({ nombre: nombrePlanta, ubicacion: ubicacionPlanta }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["plantas"] }); toast.success("Planta creada"); setNombrePlanta(""); setUbicacionPlanta(""); },
@@ -52,9 +61,28 @@ export function AdminPage() {
           <button type="submit" className="btn-primary"><Icon name="add" size={16} />Agregar</button>
         </form>
         <table className="table-sharp">
-          <thead><tr><th>Nombre</th><th>Ubicación</th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Ubicación</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            {plantas?.map(p => <tr key={p.id}><td>{p.nombre}</td><td>{p.ubicacion || "-"}</td></tr>)}
+            {plantas?.map(p => (
+              <tr key={p.id} style={p.activa ? undefined : { opacity: 0.55 }}>
+                <td>{p.nombre}</td>
+                <td>{p.ubicacion || "-"}</td>
+                <td>
+                  {p.activa
+                    ? <span className="badge" style={{ background: "var(--accent-light)", color: "var(--accent-text)" }}>Activa</span>
+                    : <span className="badge" style={{ background: "#94a3b822", color: "#64748b" }}>Inactiva</span>}
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  <button
+                    className="btn-secondary"
+                    disabled={activarPlantaMut.isPending}
+                    onClick={() => activarPlantaMut.mutate({ id: p.id, activa: !p.activa })}
+                  >
+                    {p.activa ? "Desactivar" : "Activar"}
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </section>
