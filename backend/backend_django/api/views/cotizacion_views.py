@@ -39,9 +39,13 @@ def _generar_pdf(cotizacion, firma_path=None):
     try:
         generate_cotizacion(
             pdf_path, cotizacion.numero, cotizacion.created_at.date(),
-            cotizacion.solicitud.cliente.nombre, cotizacion.planta.nombre,
+            cotizacion.solicitud.cliente.nombre,
+            ", ".join(p.nombre for p in cotizacion.plantas) or "-",
             _pdf_items(cotizacion), cotizacion.total,
             firma_path=firma_path, notas=cotizacion.notas,
+            subtotal=cotizacion.subtotal, iva=cotizacion.iva,
+            iva_porcentaje=cotizacion.iva_porcentaje,
+            tipo_precio_display=cotizacion.get_tipo_precio_display(),
         )
         cotizacion.pdf_path = str(pdf_path)
         cotizacion.save(update_fields=["pdf_path"])
@@ -83,9 +87,12 @@ class CotizacionListCreateView(APIView):
         if not planta:
             return Response({"detail": "Planta no encontrada"}, status=404)
 
+        # La tarifa viene del cliente, salvo que se pida otra explícitamente.
+        tipo_precio = d.get("tipo_precio") or solicitud.cliente.tipo_precio
+
         cotizacion = Cotizacion.objects.create(
             numero=_numero_cotizacion(), solicitud=solicitud, planta=planta,
-            notas=d.get("notas"), creado_por=request.user,
+            tipo_precio=tipo_precio, notas=d.get("notas"), creado_por=request.user,
         )
         for it in items:
             material = Material.objects.filter(id=it.get("material")).first()
@@ -101,11 +108,13 @@ class CotizacionListCreateView(APIView):
                 planta_item = p
             # El precio es el de ESA planta: repartir entre plantas con precios
             # distintos tiene que dar el precio correcto en cada línea.
-            precio = MaterialPlanta.objects.filter(material=material, planta=planta_item).first()
+            mp = MaterialPlanta.objects.filter(material=material, planta=planta_item).first()
             CotizacionItem.objects.create(
                 cotizacion=cotizacion, material=material, planta=planta_item,
                 cantidad=it.get("cantidad") or 0,
-                precio_unitario=(precio.precio_unitario if precio else (it.get("precio_unitario") or 0)),
+                precio_unitario=(
+                    mp.precio(tipo_precio) if mp else (it.get("precio_unitario") or 0)
+                ),
             )
 
         solicitud.estado = "cotizada"

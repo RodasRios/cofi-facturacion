@@ -82,18 +82,41 @@ class Material(models.Model):
         return f"{self.nombre} ({self.get_tipo_display()})"
 
 
+TIPO_PRECIO_CHOICES = [
+    ("especial", "Venta especial"),
+    ("detal", "Venta página / clientes detal"),
+]
+
+# El IVA que aplica hoy a estos materiales. Se guarda una copia en cada
+# cotización (`Cotizacion.iva_porcentaje`) para que un cambio de tarifa no
+# altere documentos ya emitidos.
+IVA_PORCENTAJE = Decimal("19")
+
+
 class MaterialPlanta(models.Model):
-    """Precio de un material en una planta específica."""
+    """Precio de un material en una planta específica, **sin IVA**.
+
+    La lista de precios de la empresa maneja dos tarifas por material: la de
+    venta especial (clientes con convenio) y la de detal. No todas las plantas
+    tienen las dos — cuando falta la de detal se usa la especial.
+    """
     material = models.ForeignKey(Material, on_delete=models.CASCADE, related_name="precios_planta")
     planta = models.ForeignKey(Planta, on_delete=models.CASCADE, related_name="precios_material")
-    precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
+    precio_especial = models.DecimalField(max_digits=14, decimal_places=2)
+    precio_detal = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     class Meta:
         db_table = "material_plantas"
         unique_together = [["material", "planta"]]
 
     def __str__(self):
-        return f"{self.material.nombre} @ {self.planta.nombre}: {self.precio_unitario}"
+        return f"{self.material.nombre} @ {self.planta.nombre}: {self.precio_especial}"
+
+    def precio(self, tipo_precio="especial"):
+        """Precio sin IVA para la tarifa pedida, con respaldo en la especial."""
+        if tipo_precio == "detal" and self.precio_detal is not None:
+            return self.precio_detal
+        return self.precio_especial
 
 
 class Cliente(models.Model):
@@ -102,6 +125,8 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=30, blank=True, null=True)
     email = models.EmailField(max_length=254, blank=True, null=True)
     direccion = models.CharField(max_length=300, blank=True, null=True)
+    # Tarifa que se le aplica por defecto al cotizarle.
+    tipo_precio = models.CharField(max_length=20, choices=TIPO_PRECIO_CHOICES, default="especial")
     numero_vinculacion = models.CharField(max_length=50, unique=True, null=True)
     vinculado = models.BooleanField(default=False)
     pdf_path = models.CharField(max_length=500, blank=True, null=True)
@@ -240,6 +265,10 @@ class Cotizacion(models.Model):
         Planta, on_delete=models.PROTECT, related_name="cotizaciones", null=True, blank=True,
     )
     estado = models.CharField(max_length=25, choices=COTIZACION_ESTADO_CHOICES, default="pendiente_aprobacion")
+    # Tarifa con la que se armó, copiada del cliente al crearla.
+    tipo_precio = models.CharField(max_length=20, choices=TIPO_PRECIO_CHOICES, default="especial")
+    # Copia del IVA vigente: si mañana cambia, esta cotización sigue cuadrando.
+    iva_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=IVA_PORCENTAJE)
     aprobado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="cotizaciones_aprobadas")
     fecha_aprobacion = models.DateTimeField(null=True, blank=True)
     motivo_rechazo = models.TextField(blank=True, null=True)
@@ -256,8 +285,18 @@ class Cotizacion(models.Model):
         return self.numero
 
     @property
-    def total(self) -> Decimal:
+    def subtotal(self) -> Decimal:
+        """Suma de las líneas, sin IVA."""
         return sum((i.subtotal for i in self.items.all()), Decimal("0"))
+
+    @property
+    def iva(self) -> Decimal:
+        return (self.subtotal * self.iva_porcentaje / Decimal("100")).quantize(Decimal("0.01"))
+
+    @property
+    def total(self) -> Decimal:
+        """Lo que paga el cliente: subtotal + IVA."""
+        return self.subtotal + self.iva
 
     @property
     def plantas(self):

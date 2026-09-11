@@ -82,6 +82,40 @@ anterior.
 - Cada rechazo, aprobación y nueva cotización escribe un `Seguimiento`
   automático; las notas manuales las agrega el comercial desde el tablero.
 
+### Dos tarifas e IVA
+
+La lista de precios real de la empresa maneja **dos tarifas por material y
+planta**: venta especial (clientes con convenio) y venta detal. Por eso
+`MaterialPlanta` tiene `precio_especial` y `precio_detal`, ambos **sin IVA**.
+
+- `precio_detal` puede ser `null` — no todas las plantas manejan esa tarifa.
+  `MaterialPlanta.precio(tipo_precio)` cae a la especial cuando falta, así que
+  **nunca leas los campos directamente** para cotizar.
+- `Cliente.tipo_precio` define qué tarifa se le aplica; la cotización copia esa
+  decisión en `Cotizacion.tipo_precio` al crearse (se puede forzar otra mandando
+  `tipo_precio` en el POST).
+- El IVA (19%, `IVA_PORCENTAJE`) lo calcula la cotización, no se guarda en los
+  precios. `Cotizacion.subtotal` es sin IVA, `iva` el impuesto y `total` la
+  suma — **`total` cambió de significado**: antes era la suma de las líneas,
+  ahora incluye IVA (es lo que se le cobra al cliente y lo que propone el pago).
+- `Cotizacion.iva_porcentaje` guarda una copia de la tarifa vigente, para que
+  subir el IVA mañana no altere documentos ya emitidos.
+
+### Catálogo real de precios
+
+`api/management/commands/cargar_precios.py` tiene las 6 plantas, 27 materiales
+y 41 precios reales (lista del 15/04/2026). Es la **única fuente**: `seed.py`
+solo lo invoca, así que no dupliques catálogos.
+
+```bash
+python manage.py cargar_precios                    # crea o actualiza precios
+python manage.py cargar_precios --desactivar-otros # apaga lo que no esté en la lista
+```
+
+Es idempotente — cuando cambien los precios, se editan las tablas de ese
+archivo y se vuelve a correr. Un detalle del PDF original: el MDC-25 aparece
+con unidad "M4", que se cargó como m3 por ser un error de digitación evidente.
+
 ### Reparto por planta (multi-planta)
 
 La planta está en el **ítem**, no en la cotización. `CotizacionItem.planta`
@@ -193,7 +227,7 @@ Same DRF layout as `cofi-gestor-insumos`, Django project package is `facturacion
 
 ```
 Planta
-  └── MaterialPlanta (precio_unitario por planta) → Material
+  └── MaterialPlanta (precio_especial + precio_detal por planta, ambos SIN IVA) → Material
 
 Cliente
   ├── ClienteToken     (link de vinculación: un solo uso, 3 días)

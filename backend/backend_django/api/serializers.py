@@ -53,7 +53,7 @@ class MaterialPlantaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MaterialPlanta
-        fields = ["id", "material", "planta", "planta_nombre", "precio_unitario"]
+        fields = ["id", "material", "planta", "planta_nombre", "precio_especial", "precio_detal"]
 
 
 class MaterialSerializer(serializers.ModelSerializer):
@@ -71,8 +71,9 @@ class ClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cliente
         fields = [
-            "id", "nombre", "nit", "telefono", "email", "direccion", "numero_vinculacion",
-            "vinculado", "pdf_path", "creado_por", "creado_por_username", "created_at",
+            "id", "nombre", "nit", "telefono", "email", "direccion", "tipo_precio",
+            "numero_vinculacion", "vinculado", "pdf_path",
+            "creado_por", "creado_por_username", "created_at",
         ]
         read_only_fields = ["creado_por", "numero_vinculacion", "pdf_path"]
 
@@ -191,6 +192,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source="solicitud.cliente.nombre", read_only=True)
     creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
     aprobado_por_username = serializers.CharField(source="aprobado_por.username", read_only=True)
+    subtotal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    iva = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     tiene_orden_suministro = serializers.SerializerMethodField()
     plantas_nombres = serializers.SerializerMethodField()
@@ -202,11 +205,15 @@ class CotizacionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "numero", "solicitud", "solicitud_numero", "cliente_nombre",
             "planta", "planta_nombre", "estado", "aprobado_por", "aprobado_por_username",
-            "fecha_aprobacion", "motivo_rechazo", "notas", "pdf_path", "items", "total",
+            "fecha_aprobacion", "motivo_rechazo", "notas", "pdf_path", "items",
+            "tipo_precio", "iva_porcentaje", "subtotal", "iva", "total",
             "creado_por", "creado_por_username", "tiene_orden_suministro",
             "plantas_nombres", "tiene_pago", "pagos_rechazados", "created_at",
         ]
-        read_only_fields = ["numero", "estado", "creado_por", "aprobado_por", "fecha_aprobacion", "pdf_path"]
+        read_only_fields = [
+            "numero", "estado", "creado_por", "aprobado_por", "fecha_aprobacion",
+            "pdf_path", "iva_porcentaje",
+        ]
 
     def get_tiene_orden_suministro(self, obj):
         return obj.ordenes_suministro.exists()

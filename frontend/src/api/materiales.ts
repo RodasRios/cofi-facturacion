@@ -11,7 +11,12 @@ export async function createMaterial(data: { nombre: string; tipo: MaterialTipo;
   return res.data;
 }
 
-export async function setPrecioMaterial(materialId: number, plantaId: number, precioUnitario: number): Promise<Material> {
-  const res = await client.post(`/materiales/${materialId}/precios/`, { planta: plantaId, precio_unitario: precioUnitario });
+/** Envía solo las tarifas indicadas, para poder editar una sin borrar la otra. */
+export async function setPrecioMaterial(
+  materialId: number,
+  plantaId: number,
+  precios: { precio_especial?: number; precio_detal?: number | null },
+): Promise<Material> {
+  const res = await client.post(`/materiales/${materialId}/precios/`, { planta: plantaId, ...precios });
   return res.data;
 }

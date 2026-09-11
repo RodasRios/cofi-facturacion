@@ -63,13 +63,27 @@ class MaterialPrecioView(APIView):
         if not material:
             return Response({"detail": "Material no encontrado"}, status=404)
         planta_id = request.data.get("planta")
-        precio = request.data.get("precio_unitario")
-        if not planta_id or precio is None:
-            return Response({"detail": "planta y precio_unitario son requeridos"}, status=400)
+        if not planta_id:
+            return Response({"detail": "planta es requerida"}, status=400)
         planta = Planta.objects.filter(id=planta_id).first()
         if not planta:
             return Response({"detail": "Planta no encontrada"}, status=404)
+
+        # Solo se tocan las tarifas que vengan en la petición, para poder
+        # editar una sin borrar la otra.
+        defaults = {}
+        if request.data.get("precio_especial") is not None:
+            defaults["precio_especial"] = request.data["precio_especial"]
+        if "precio_detal" in request.data:
+            defaults["precio_detal"] = request.data["precio_detal"] or None
+        if not defaults:
+            return Response({"detail": "Envía precio_especial y/o precio_detal"}, status=400)
+
+        existente = MaterialPlanta.objects.filter(material=material, planta=planta).first()
+        if existente is None and "precio_especial" not in defaults:
+            return Response({"detail": "El precio especial es obligatorio la primera vez"}, status=400)
+
         mp, _ = MaterialPlanta.objects.update_or_create(
-            material=material, planta=planta, defaults={"precio_unitario": precio},
+            material=material, planta=planta, defaults=defaults,
         )
         return Response(MaterialSerializer(material).data, status=201)

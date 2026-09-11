@@ -22,12 +22,16 @@ export interface Planta {
 
 export type MaterialTipo = "triturado" | "agregado" | "otro";
 
+export type TipoPrecio = "especial" | "detal";
+
 export interface MaterialPlantaPrecio {
   id: number;
   material: number;
   planta: number;
   planta_nombre: string;
-  precio_unitario: string;
+  /** Ambos sin IVA. `precio_detal` en null = esa planta no maneja esa tarifa. */
+  precio_especial: string;
+  precio_detal: string | null;
 }
 
 export interface Material {
@@ -48,6 +52,7 @@ export interface Cliente {
   telefono: string | null;
   email: string | null;
   direccion: string | null;
+  tipo_precio: TipoPrecio;
   numero_vinculacion: string | null;
   vinculado: boolean;
   pdf_path: string | null;
@@ -190,6 +195,10 @@ export interface Cotizacion {
   notas: string | null;
   pdf_path: string | null;
   items: CotizacionItem[];
+  tipo_precio: TipoPrecio;
+  iva_porcentaje: string;
+  subtotal: string;
+  iva: string;
   total: string;
   creado_por: number | null;
   creado_por_username: string | null;

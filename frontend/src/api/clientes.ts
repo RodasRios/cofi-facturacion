@@ -8,6 +8,7 @@ export async function getClientes(q?: string): Promise<Cliente[]> {
 
 export async function createCliente(data: {
   nombre: string; nit?: string; telefono?: string; email?: string; direccion?: string;
+  tipo_precio?: "especial" | "detal";
 }): Promise<Cliente> {
   const res = await client.post("/clientes/", data);
   return res.data;

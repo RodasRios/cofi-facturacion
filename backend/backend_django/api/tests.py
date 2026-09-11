@@ -100,7 +100,7 @@ class ReintentoYTableroTest(TestCase):
 
         self.planta = Planta.objects.create(nombre="Planta Uno")
         self.material = Material.objects.create(nombre="Triturado 3/4", unidad_medida="m3")
-        MaterialPlanta.objects.create(material=self.material, planta=self.planta, precio_unitario=100)
+        MaterialPlanta.objects.create(material=self.material, planta=self.planta, precio_especial=100)
 
         self.cliente = Cliente.objects.create(nombre="Cliente X", numero_vinculacion="VIN-0001")
         self.solicitud = SolicitudCotizacion.objects.create(
@@ -267,8 +267,10 @@ class MultiPlantaTest(TestCase):
         self.p2 = Planta.objects.create(nombre="Planta Dos")
         self.material = Material.objects.create(nombre="Triturado 3/4", unidad_medida="m3")
         # Precios distintos a propósito: el reparto debe cobrar el de cada planta.
-        MaterialPlanta.objects.create(material=self.material, planta=self.p1, precio_unitario=100)
-        MaterialPlanta.objects.create(material=self.material, planta=self.p2, precio_unitario=150)
+        MaterialPlanta.objects.create(
+            material=self.material, planta=self.p1, precio_especial=100, precio_detal=120)
+        MaterialPlanta.objects.create(
+            material=self.material, planta=self.p2, precio_especial=150, precio_detal=180)
 
         self.cliente = Cliente.objects.create(nombre="Cliente X", numero_vinculacion="VIN-0001")
         self.solicitud = SolicitudCotizacion.objects.create(
@@ -293,8 +295,10 @@ class MultiPlantaTest(TestCase):
         self.assertEqual(r.status_code, 201, r.content)
         data = r.json()
 
-        # 60 × 100 + 40 × 150 = 12.000
-        self.assertEqual(Decimal(data["total"]), Decimal("12000.00"))
+        # 60 × 100 + 40 × 150 = 12.000 sin IVA; con 19% = 14.280
+        self.assertEqual(Decimal(data["subtotal"]), Decimal("12000.00"))
+        self.assertEqual(Decimal(data["iva"]), Decimal("2280.00"))
+        self.assertEqual(Decimal(data["total"]), Decimal("14280.00"))
         self.assertEqual(sorted(data["plantas_nombres"]), ["Planta Dos", "Planta Uno"])
         precios = {i["planta_nombre"]: Decimal(i["precio_unitario"]) for i in data["items"]}
         self.assertEqual(precios["Planta Uno"], Decimal("100.00"))
@@ -429,3 +433,91 @@ class LinkDePedidosTest(TestCase):
         self.assertEqual(SolicitudCotizacion.objects.count(), 0)
 
         self.assertEqual(self.pub.get("/api/v1/publico/solicitud/nada/").status_code, 404)
+
+
+@override_settings(GENERATED_PDF_DIR=_TMP_PDFS)
+class TarifasEIvaTest(TestCase):
+    """Dos listas de precios por planta e IVA discriminado."""
+
+    def setUp(self):
+        self.comercial = User(username="com", rol="comercial")
+        self.comercial.set_password("x")
+        self.comercial.save()
+
+        self.planta = Planta.objects.create(nombre="Planta de prueba")
+        self.material = Material.objects.create(nombre="Piedra de prueba", unidad_medida="m3")
+        # Como en la lista real: especial 44.000, detal 54.000.
+        MaterialPlanta.objects.create(
+            material=self.material, planta=self.planta,
+            precio_especial=Decimal("44000"), precio_detal=Decimal("54000"),
+        )
+        # Catarina no maneja tarifa de detal.
+        self.sin_detal = Material.objects.create(nombre="Base de prueba", unidad_medida="m3")
+        MaterialPlanta.objects.create(
+            material=self.sin_detal, planta=self.planta,
+            precio_especial=Decimal("43000"), precio_detal=None,
+        )
+        self.api = APIClient()
+        r = self.api.post("/api/v1/auth/login", {"username": "com", "password": "x"}, format="json")
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def _cotizar(self, tipo_precio_cliente, material=None):
+        cliente = Cliente.objects.create(
+            nombre=f"Cliente {tipo_precio_cliente}", tipo_precio=tipo_precio_cliente,
+            numero_vinculacion=f"VIN-{tipo_precio_cliente}",
+        )
+        material = material or self.material
+        solicitud = SolicitudCotizacion.objects.create(
+            numero=f"SC-{tipo_precio_cliente}-{material.id}", cliente=cliente, creado_por=self.comercial)
+        SolicitudCotizacionItem.objects.create(solicitud=solicitud, material=material, cantidad=10)
+        r = self.api.post("/api/v1/cotizaciones/", {
+            "solicitud": solicitud.id, "planta": self.planta.id,
+            "items": [{"material": material.id, "cantidad": 10}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()
+
+    def test_la_tarifa_sale_del_cliente(self):
+        especial = self._cotizar("especial")
+        self.assertEqual(especial["tipo_precio"], "especial")
+        self.assertEqual(Decimal(especial["items"][0]["precio_unitario"]), Decimal("44000.00"))
+        self.assertEqual(Decimal(especial["subtotal"]), Decimal("440000.00"))
+
+        detal = self._cotizar("detal")
+        self.assertEqual(detal["tipo_precio"], "detal")
+        self.assertEqual(Decimal(detal["items"][0]["precio_unitario"]), Decimal("54000.00"))
+        self.assertEqual(Decimal(detal["subtotal"]), Decimal("540000.00"))
+
+    def test_sin_tarifa_detal_se_usa_la_especial(self):
+        cot = self._cotizar("detal", material=self.sin_detal)
+        self.assertEqual(Decimal(cot["items"][0]["precio_unitario"]), Decimal("43000.00"))
+
+    def test_iva_discriminado(self):
+        cot = self._cotizar("especial")
+        self.assertEqual(Decimal(cot["iva_porcentaje"]), Decimal("19.00"))
+        self.assertEqual(Decimal(cot["subtotal"]), Decimal("440000.00"))
+        self.assertEqual(Decimal(cot["iva"]), Decimal("83600.00"))
+        self.assertEqual(Decimal(cot["total"]), Decimal("523600.00"))
+
+    def test_catalogo_real_se_carga_y_es_idempotente(self):
+        from django.core.management import call_command
+        for _ in range(2):
+            call_command("cargar_precios", verbosity=0)
+
+        # 6 del catálogo + la de esta prueba.
+        self.assertEqual(Planta.objects.filter(activa=True).count(), 7)
+        self.assertEqual(MaterialPlanta.objects.filter(planta__nombre="Planta Portobelo").count(), 18)
+
+        # Un precio conocido de la lista: piedra filtro en Portobelo.
+        mp = MaterialPlanta.objects.get(
+            planta__nombre="Planta Portobelo", material__nombre="Piedra filtro")
+        self.assertEqual(mp.precio_especial, Decimal("44000.00"))
+        self.assertEqual(mp.precio_detal, Decimal("54000.00"))
+        self.assertEqual(mp.precio("especial"), Decimal("44000.00"))
+        self.assertEqual(mp.precio("detal"), Decimal("54000.00"))
+
+        # Catarina no tiene tarifa de detal: cae a la especial.
+        catarina = MaterialPlanta.objects.get(
+            planta__nombre="Planta Catarina", material__nombre="Base granular tipo INVIAS")
+        self.assertIsNone(catarina.precio_detal)
+        self.assertEqual(catarina.precio("detal"), Decimal("43000.00"))

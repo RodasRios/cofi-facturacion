@@ -29,8 +29,10 @@ export function AdminPage() {
   });
 
   const precioMut = useMutation({
-    mutationFn: ({ materialId, plantaId, precio }: { materialId: number; plantaId: number; precio: number }) =>
-      setPrecioMaterial(materialId, plantaId, precio),
+    mutationFn: ({ materialId, plantaId, campo, valor }: {
+      materialId: number; plantaId: number;
+      campo: "precio_especial" | "precio_detal"; valor: number | null;
+    }) => setPrecioMaterial(materialId, plantaId, { [campo]: valor }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["materiales"] }); toast.success("Precio actualizado"); },
     onError: () => toast.error("No se pudo actualizar el precio"),
   });
@@ -79,7 +81,14 @@ export function AdminPage() {
               <th>Material</th>
               <th>Tipo</th>
               <th>Unidad</th>
-              {plantas?.map(p => <th key={p.id}>{p.nombre}</th>)}
+              {plantas?.map(p => (
+                <th key={p.id}>
+                  {p.nombre}
+                  <span style={{ display: "block", fontWeight: 400, fontSize: 10, opacity: 0.7 }}>
+                    especial · detal
+                  </span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -90,23 +99,42 @@ export function AdminPage() {
                 <td>{m.unidad_medida}</td>
                 {plantas?.map(p => {
                   const precio = m.precios.find(pr => pr.planta === p.id);
+                  // Dos casillas por planta: venta especial y venta detal.
+                  const casilla = (
+                    campo: "precio_especial" | "precio_detal",
+                    actual: string | null | undefined,
+                    titulo: string,
+                  ) => (
+                    <input
+                      className="input-base"
+                      style={{ width: 84 }}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      title={titulo}
+                      defaultValue={actual ?? ""}
+                      placeholder="—"
+                      onBlur={e => {
+                        const txt = e.target.value.trim();
+                        const val = txt === "" ? null : Number(txt);
+                        if (val !== null && !(val > 0)) return;
+                        const previo = actual == null ? null : Number(actual);
+                        if (val === previo) return;
+                        // El precio especial es obligatorio: no se puede vaciar.
+                        if (campo === "precio_especial" && val === null) {
+                          e.target.value = actual ?? "";
+                          return;
+                        }
+                        precioMut.mutate({ materialId: m.id, plantaId: p.id, campo, valor: val });
+                      }}
+                    />
+                  );
                   return (
                     <td key={p.id}>
-                      <input
-                        className="input-base"
-                        style={{ width: 90 }}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        defaultValue={precio?.precio_unitario ?? ""}
-                        placeholder="—"
-                        onBlur={e => {
-                          const val = Number(e.target.value);
-                          if (val > 0 && val !== Number(precio?.precio_unitario ?? -1)) {
-                            precioMut.mutate({ materialId: m.id, plantaId: p.id, precio: val });
-                          }
-                        }}
-                      />
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {casilla("precio_especial", precio?.precio_especial, "Venta especial (sin IVA)")}
+                        {casilla("precio_detal", precio?.precio_detal, "Venta detal (sin IVA) — vacío usa la especial")}
+                      </div>
                     </td>
                   );
                 })}

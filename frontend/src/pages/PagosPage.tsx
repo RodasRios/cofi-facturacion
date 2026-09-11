@@ -72,7 +72,7 @@ export function PagosPage() {
           <select className="input-base" style={{ width: "100%", marginBottom: 12 }} value={cotizacionId} onChange={e => setCotizacionId(e.target.value)} required>
             <option value="">Selecciona una cotización</option>
             {cotizacionesSinPago.map(c => (
-              <option key={c.id} value={c.id}>{c.numero} — {c.cliente_nombre} — $ {Number(c.total).toLocaleString("es-CO")}</option>
+              <option key={c.id} value={c.id}>{c.numero} — {c.cliente_nombre} — $ {Number(c.total).toLocaleString("es-CO")} (IVA incl.)</option>
             ))}
           </select>
           <div style={{ display: "flex", gap: 8 }}>

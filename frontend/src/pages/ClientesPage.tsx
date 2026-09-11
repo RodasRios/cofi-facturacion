@@ -24,14 +24,15 @@ export function ClientesPage() {
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
   const [direccion, setDireccion] = useState("");
+  const [tipoPrecio, setTipoPrecio] = useState<"especial" | "detal">("especial");
 
   const createMut = useMutation({
-    mutationFn: () => createCliente({ nombre, nit, telefono, email, direccion }),
+    mutationFn: () => createCliente({ nombre, nit, telefono, email, direccion, tipo_precio: tipoPrecio }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clientes"] });
       toast.success("Cliente creado — formato de vinculación generado automáticamente");
       setShowForm(false);
-      setNombre(""); setNit(""); setTelefono(""); setEmail(""); setDireccion("");
+      setNombre(""); setNit(""); setTelefono(""); setEmail(""); setDireccion(""); setTipoPrecio("especial");
     },
     onError: () => toast.error("No se pudo crear el cliente"),
   });
@@ -99,6 +100,14 @@ export function ClientesPage() {
           <div>
             <label className="section-label">Email</label>
             <input className="input-base" style={{ width: "100%" }} type="email" value={email} onChange={e => setEmail(e.target.value)} />
+          </div>
+          <div>
+            <label className="section-label">Tarifa</label>
+            <select className="input-base" style={{ width: "100%" }} value={tipoPrecio}
+              onChange={e => setTipoPrecio(e.target.value as "especial" | "detal")}>
+              <option value="especial">Venta especial</option>
+              <option value="detal">Venta detal</option>
+            </select>
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <label className="section-label">Dirección</label>

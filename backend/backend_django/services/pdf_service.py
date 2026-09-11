@@ -214,22 +214,48 @@ def _items_table(items: list[dict], mostrar_precio: bool = True) -> Table:
 def generate_cotizacion(
     path: Path, numero: str, fecha: date, cliente_nombre: str, planta_nombre: str,
     items: list[dict], total: Decimal, firma_path: str | None = None, notas: str | None = None,
+    subtotal: Decimal | None = None, iva: Decimal | None = None,
+    iva_porcentaje: Decimal | None = None, tipo_precio_display: str | None = None,
 ) -> None:
     doc = _base_doc(path, f"Cotización {numero}")
     elements = _build_header("Formato de Cotización", numero, fecha)
-    elements.append(_build_datos_generales([("Cliente", cliente_nombre), ("Planta", planta_nombre)]))
+    datos = [("Cliente", cliente_nombre), ("Planta", planta_nombre)]
+    if tipo_precio_display:
+        datos.append(("Tarifa", tipo_precio_display))
+    elements.append(_build_datos_generales(datos))
     elements.append(Spacer(1, 14))
     elements.append(_items_table(items))
     elements.append(Spacer(1, 10))
 
-    total_table = Table([[
-        Paragraph("<b>TOTAL</b>", ParagraphStyle("tot", fontSize=11, fontName="Helvetica-Bold", textColor=BRAND_BLUE)),
-        Paragraph(f"<b>$ {Decimal(total):,.2f}</b>", ParagraphStyle("tot2", fontSize=11, fontName="Helvetica-Bold", alignment=TA_RIGHT)),
-    ]], colWidths=[13.5 * cm, 3.5 * cm])
-    total_table.setStyle(TableStyle([
-        ("LINEABOVE", (0, 0), (-1, 0), 1, BRAND_BLUE),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-    ]))
+    # Subtotal e IVA discriminados: es lo que exige un documento comercial.
+    normal = ParagraphStyle("lin", fontSize=9.5)
+    derecha = ParagraphStyle("lin2", fontSize=9.5, alignment=TA_RIGHT)
+    fuerte = ParagraphStyle("tot", fontSize=11, fontName="Helvetica-Bold", textColor=BRAND_BLUE)
+    fuerte_der = ParagraphStyle("tot2", fontSize=11, fontName="Helvetica-Bold", alignment=TA_RIGHT)
+
+    filas = []
+    if subtotal is not None:
+        pct = f"{Decimal(iva_porcentaje):g}" if iva_porcentaje is not None else "19"
+        filas.append([
+            Paragraph("Subtotal (sin IVA)", normal),
+            Paragraph(f"$ {Decimal(subtotal):,.2f}", derecha),
+        ])
+        filas.append([
+            Paragraph(f"IVA ({pct}%)", normal),
+            Paragraph(f"$ {Decimal(iva or 0):,.2f}", derecha),
+        ])
+    filas.append([
+        Paragraph("<b>TOTAL</b>", fuerte),
+        Paragraph(f"<b>$ {Decimal(total):,.2f}</b>", fuerte_der),
+    ])
+
+    total_table = Table(filas, colWidths=[13.5 * cm, 3.5 * cm])
+    estilo = [
+        ("LINEABOVE", (0, len(filas) - 1), (-1, len(filas) - 1), 1, BRAND_BLUE),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    total_table.setStyle(TableStyle(estilo))
     elements.append(total_table)
 
     elements += _build_firma_section(firma_path, "Aprobado por")

@@ -145,13 +145,15 @@ export function CotizacionesPage() {
               <th>N.°</th>
               <th>Cliente</th>
               <th>Planta</th>
+              <th>Subtotal</th>
+              <th>IVA</th>
               <th>Total</th>
               <th>Estado</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td colSpan={6} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
+            {isLoading && <tr><td colSpan={8} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
             {cotizaciones?.map(c => (
               <tr key={c.id}>
                 <td>{c.numero}</td>
@@ -161,7 +163,13 @@ export function CotizacionesPage() {
                     ? <span title={c.plantas_nombres.join(", ")}>{c.plantas_nombres.length} plantas</span>
                     : (c.plantas_nombres[0] ?? c.planta_nombre ?? "-")}
                 </td>
-                <td>$ {Number(c.total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                <td>$ {Number(c.subtotal).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                <td title={`IVA ${Number(c.iva_porcentaje)}%`}>
+                  $ {Number(c.iva).toLocaleString("es-CO", { minimumFractionDigits: 2 })}
+                </td>
+                <td style={{ fontWeight: 600 }}>
+                  $ {Number(c.total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}
+                </td>
                 <td>
                   <span className="badge" style={{ background: `${ESTADO_COLOR[c.estado]}22`, color: ESTADO_COLOR[c.estado] }}>
                     {ESTADO_LABEL[c.estado]}
@@ -189,7 +197,7 @@ export function CotizacionesPage() {
               </tr>
             ))}
             {!isLoading && cotizaciones?.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>Sin cotizaciones todavía</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>Sin cotizaciones todavía</td></tr>
             )}
           </tbody>
         </table>

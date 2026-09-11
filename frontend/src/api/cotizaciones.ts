@@ -11,6 +11,8 @@ export async function createCotizacion(data: {
   /** Planta por defecto: la que se usa para los ítems que no traen la suya. */
   planta: number;
   notas?: string;
+  /** Tarifa a aplicar. Si se omite, se usa la del cliente. */
+  tipo_precio?: "especial" | "detal";
   /** `planta` por ítem permite repartir un material entre varias plantas. */
   items: { material: number; cantidad: number; planta?: number }[];
 }): Promise<Cotizacion> {
