@@ -47,7 +47,7 @@ export async function getPedidoInfo(token: string): Promise<PedidoInfo> {
 
 export async function enviarPedido(
   token: string,
-  data: { items: { material: number; cantidad: number }[]; notas?: string },
+  data: { items: { material: number; cantidad: number }[]; obra?: string; notas?: string },
 ): Promise<{ detail: string; numero: string }> {
   const res = await publico.post(`/publico/solicitud/${token}/`, data);
   return res.data;

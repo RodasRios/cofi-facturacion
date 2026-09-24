@@ -15,7 +15,10 @@ class LoginSerializer(serializers.Serializer):
 class UserOutSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "username", "email", "nombre", "rol", "is_admin", "is_active", "firma_path", "created_at"]
+        fields = [
+            "id", "username", "email", "nombre", "rol", "cargo", "telefono",
+            "is_admin", "is_active", "firma_path", "created_at",
+        ]
 
 
 class UserWriteSerializer(serializers.ModelSerializer):
@@ -23,7 +26,10 @@ class UserWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "nombre", "rol", "is_admin", "is_active", "password"]
+        fields = [
+            "id", "username", "email", "nombre", "rol", "cargo", "telefono",
+            "is_admin", "is_active", "password",
+        ]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
@@ -152,7 +158,7 @@ class SolicitudCotizacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = SolicitudCotizacion
         fields = [
-            "id", "numero", "cliente", "cliente_nombre", "estado", "notas",
+            "id", "numero", "cliente", "cliente_nombre", "estado", "obra", "notas",
             "items", "creado_por", "creado_por_username", "tiene_cotizacion",
             "cotizaciones_rechazadas", "created_at",
         ]
@@ -248,13 +254,15 @@ class OrdenSuministroSerializer(serializers.ModelSerializer):
     planta_nombre = serializers.CharField(source="planta.nombre", read_only=True)
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True)
     cliente_nombre = serializers.CharField(source="cotizacion.solicitud.cliente.nombre", read_only=True)
+    obra = serializers.CharField(source="cotizacion.solicitud.obra", read_only=True)
     items = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenSuministro
         fields = [
             "id", "numero", "cotizacion", "cotizacion_numero", "cliente_nombre",
-            "planta", "planta_nombre", "notificada_planta", "fecha_notificacion",
+            "planta", "planta_nombre", "obra", "notificada_planta", "fecha_notificacion",
+            "fecha_suministro", "placas_empresa", "placas_cliente",
             "notas", "pdf_path", "items", "creado_por", "created_at",
         ]
         read_only_fields = ["numero", "creado_por", "pdf_path", "notificada_planta", "fecha_notificacion"]
@@ -287,7 +295,7 @@ class DespachoSerializer(serializers.ModelSerializer):
         model = Despacho
         fields = [
             "id", "numero", "orden_suministro", "orden_suministro_numero", "planta_nombre",
-            "cliente_nombre", "fecha", "recibido_por", "cliente_retira", "placa_vehiculo",
+            "cliente_nombre", "consecutivo", "fecha", "recibido_por", "cliente_retira", "placa_vehiculo",
             "notas", "pdf_path", "items", "creado_por", "created_at",
         ]
         read_only_fields = ["numero", "creado_por", "pdf_path"]

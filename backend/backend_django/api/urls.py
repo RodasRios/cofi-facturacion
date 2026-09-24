@@ -17,6 +17,7 @@ from api.views.orden_suministro_views import (
 )
 from api.views.despacho_views import DespachoListCreateView, DespachoDetailView, DespachoPdfView
 from api.views.tablero_views import TableroView, SeguimientoListCreateView
+from api.views.control_despachos_views import ControlDespachosPdfView
 from api.views.solicitud_token_views import (
     SolicitudTokenListCreateView, SolicitudTokenRevocarView, SolicitudPublicaView,
 )
@@ -91,6 +92,9 @@ urlpatterns += p("ordenes-suministro/<int:orden_id>/notificar/", OrdenSuministro
 urlpatterns += p("ordenes-suministro/<int:orden_id>/pdf/", OrdenSuministroPdfView.as_view())
 urlpatterns += p("ordenes-suministro/<int:orden_id>/", OrdenSuministroDetailView.as_view())
 urlpatterns += p("ordenes-suministro/", OrdenSuministroListView.as_view())
+
+# Control de despacho de materiales (consolidado por cliente, al vuelo)
+urlpatterns += p("control-despachos/pdf/", ControlDespachosPdfView.as_view())
 
 # Despachos (Control de Despacho y Recibo de Material)
 urlpatterns += p("despachos/<int:despacho_id>/pdf/", DespachoPdfView.as_view())

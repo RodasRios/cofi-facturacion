@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { getPlantas, createPlanta, setPlantaActiva } from "../api/plantas";
 import { getMateriales, createMaterial, setPrecioMaterial } from "../api/materiales";
 import { Icon } from "../components/ui/Icon";
+import { UsuariosAdmin } from "../components/UsuariosAdmin";
+import { MiFirma } from "../components/MiFirma";
 import type { MaterialTipo } from "../types";
 
 export function AdminPage() {
@@ -49,6 +51,9 @@ export function AdminPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Administración</h1>
+
+      <MiFirma compacto />
+      <UsuariosAdmin />
 
       <section className="card" style={{ padding: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 12px" }}>Plantas</h2>

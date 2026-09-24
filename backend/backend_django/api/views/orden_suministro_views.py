@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from django.conf import settings
 from django.http import FileResponse
@@ -7,35 +8,60 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from api.models import OrdenSuministro
 from api.serializers import OrdenSuministroSerializer
-from api.permissions import IsPlanta
+from api.permissions import IsPlanta, _has_rol
+from rest_framework.permissions import BasePermission
+
+
+class PuedeEditarOrden(BasePermission):
+    def has_permission(self, request, view):
+        return _has_rol(request.user, "comercial", "planta")
 from services.pdf_service import generate_orden_suministro
 
 logger = logging.getLogger(__name__)
 
 
-def _pdf_items(orden):
+def _placas(texto):
+    """"SPT880, WMB006" → ["SPT880", "WMB006"]. Acepta comas, punto y coma o saltos de línea."""
+    if not texto:
+        return []
+    return [p.strip().upper() for p in re.split(r"[,;\n]+", texto) if p.strip()]
+
+
+def _datos_pdf(orden):
+    cotizacion = orden.cotizacion
+    solicitud = cotizacion.solicitud
     # Solo lo que despacha ESTA planta: si la cotización se repartió entre
     # varias, cada orden lleva únicamente su parte.
-    return [
-        {
-            "material_nombre": i.material.nombre,
-            "cantidad": i.cantidad,
-            "unidad_medida": i.material.unidad_medida,
-        }
-        for i in orden.cotizacion.items.select_related("material", "planta")
+    items = [
+        {"material": i.material.nombre, "cantidad": i.cantidad, "unidad": i.material.unidad_medida}
+        for i in cotizacion.items.select_related("material", "planta")
         if i.planta_efectiva and i.planta_efectiva.id == orden.planta_id
     ]
+    # Autoriza el comercial que llevó la negociación, como en el formato en papel.
+    comercial = cotizacion.creado_por
+    return {
+        "numero": orden.numero,
+        "fecha": timezone.localtime(orden.created_at).date(),
+        "cliente": solicitud.cliente.nombre,
+        "obra": solicitud.obra,
+        "planta": orden.planta.nombre,
+        "items": items,
+        "fecha_suministro": orden.fecha_suministro,
+        "placas_empresa": _placas(orden.placas_empresa),
+        "placas_cliente": _placas(orden.placas_cliente),
+        "observacion": orden.notas,
+        "autoriza": {
+            "nombre": (comercial.nombre or comercial.username) if comercial else "",
+            "area": "ÁREA COMERCIAL",
+        },
+    }
 
 
 def _generar_pdf(orden):
     pdf_dir = settings.GENERATED_PDF_DIR
     pdf_path = pdf_dir / f"OS_{orden.id}_{orden.numero.replace('-', '_')}.pdf"
     try:
-        generate_orden_suministro(
-            pdf_path, orden.numero, orden.created_at.date(),
-            orden.cotizacion.solicitud.cliente.nombre, orden.planta.nombre,
-            _pdf_items(orden), notas=orden.notas,
-        )
+        generate_orden_suministro(pdf_path, _datos_pdf(orden))
         orden.pdf_path = str(pdf_path)
         orden.save(update_fields=["pdf_path"])
     except Exception as e:
@@ -57,7 +83,19 @@ class OrdenSuministroListView(APIView):
         return Response(OrdenSuministroSerializer(ordenes, many=True).data)
 
 
+# Lo que se completa después de emitida la orden: cuándo retira el cliente,
+# con qué vehículos y cualquier observación para la planta.
+CAMPOS_EDITABLES = ("fecha_suministro", "placas_empresa", "placas_cliente", "notas")
+
+
 class OrdenSuministroDetailView(APIView):
+    def get_permissions(self):
+        # Las placas las recibe el comercial del cliente; la planta también
+        # puede corregirlas en portería. Ver la orden, cualquiera.
+        if self.request.method == "PATCH":
+            return [PuedeEditarOrden()]
+        return super().get_permissions()
+
     def get(self, request, orden_id):
         orden = OrdenSuministro.objects.filter(id=orden_id).first()
         if not orden:
@@ -65,6 +103,21 @@ class OrdenSuministroDetailView(APIView):
         if not orden.pdf_path:
             _generar_pdf(orden)
             orden.refresh_from_db()
+        return Response(OrdenSuministroSerializer(orden).data)
+
+    def patch(self, request, orden_id):
+        orden = OrdenSuministro.objects.filter(id=orden_id).first()
+        if not orden:
+            return Response({"detail": "No encontrada"}, status=404)
+        datos = {k: request.data[k] for k in CAMPOS_EDITABLES if k in request.data}
+        ser = OrdenSuministroSerializer(orden, data=datos, partial=True)
+        if not ser.is_valid():
+            return Response(ser.errors, status=400)
+        ser.save()
+        # El formato impreso debe reflejar las placas nuevas: la planta lo usa
+        # para dejar entrar los vehículos.
+        _generar_pdf(orden)
+        orden.refresh_from_db()
         return Response(OrdenSuministroSerializer(orden).data)
 
 
@@ -87,9 +140,10 @@ class OrdenSuministroPdfView(APIView):
         orden = OrdenSuministro.objects.filter(id=orden_id).first()
         if not orden:
             return Response({"detail": "No encontrada"}, status=404)
-        if not orden.pdf_path:
-            _generar_pdf(orden)
-            orden.refresh_from_db()
+        # Siempre fresco: las órdenes emitidas antes del formato nuevo también
+        # salen con él, y cualquier cambio de placas queda reflejado.
+        _generar_pdf(orden)
+        orden.refresh_from_db()
         path = Path(orden.pdf_path) if orden.pdf_path else None
         if not path or not path.exists():
             return Response({"detail": "PDF no disponible"}, status=404)

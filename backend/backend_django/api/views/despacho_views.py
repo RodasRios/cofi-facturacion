@@ -76,6 +76,7 @@ class DespachoListCreateView(APIView):
 
         despacho = Despacho.objects.create(
             numero=_numero_despacho(), orden_suministro=orden, fecha=fecha,
+            consecutivo=(d.get("consecutivo") or "").strip() or None,
             recibido_por=d.get("recibido_por"), cliente_retira=d.get("cliente_retira", True),
             placa_vehiculo=d.get("placa_vehiculo"), notas=d.get("notas"), creado_por=request.user,
         )

@@ -6,6 +6,9 @@ export interface User {
   email: string | null;
   nombre: string | null;
   rol: Rol;
+  /** Salen bajo la firma en cotización, orden y control de despachos. */
+  cargo: string | null;
+  telefono: string | null;
   is_admin: boolean;
   is_active: boolean;
   firma_path: string | null;
@@ -154,6 +157,7 @@ export interface SolicitudCotizacion {
   cliente: number;
   cliente_nombre: string;
   estado: SolicitudEstado;
+  obra: string | null;
   notas: string | null;
   items: SolicitudCotizacionItem[];
   creado_por: number | null;
@@ -233,8 +237,13 @@ export interface OrdenSuministro {
   cliente_nombre: string;
   planta: number;
   planta_nombre: string;
+  obra: string | null;
   notificada_planta: boolean;
   fecha_notificacion: string | null;
+  /** Se completan después de emitida, cuando el cliente confirma el retiro. */
+  fecha_suministro: string | null;
+  placas_empresa: string | null;
+  placas_cliente: string | null;
   notas: string | null;
   pdf_path: string | null;
   items: CotizacionItem[];
@@ -257,6 +266,8 @@ export interface Despacho {
   orden_suministro_numero: string;
   planta_nombre: string;
   cliente_nombre: string;
+  /** Número del tiquete de báscula de la planta (no el REM interno). */
+  consecutivo: string | null;
   fecha: string;
   recibido_por: string | null;
   cliente_retira: boolean;

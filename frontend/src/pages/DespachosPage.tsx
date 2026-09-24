@@ -21,6 +21,7 @@ export function DespachosPage() {
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [recibidoPor, setRecibidoPor] = useState("");
   const [placa, setPlaca] = useState("");
+  const [consecutivo, setConsecutivo] = useState("");
   const [clienteRetira, setClienteRetira] = useState(true);
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
 
@@ -28,7 +29,7 @@ export function DespachosPage() {
 
   const createMut = useMutation({
     mutationFn: () => createDespacho({
-      orden_suministro: Number(ordenId), fecha, recibido_por: recibidoPor,
+      orden_suministro: Number(ordenId), fecha, consecutivo, recibido_por: recibidoPor,
       placa_vehiculo: placa, cliente_retira: clienteRetira,
       items: (ordenSel?.items ?? [])
         .filter(i => Number(cantidades[i.material] ?? i.cantidad) > 0)
@@ -70,7 +71,12 @@ export function DespachosPage() {
             </div>
             <div>
               <label className="section-label">Placa vehículo</label>
-              <input className="input-base" style={{ width: "100%" }} value={placa} onChange={e => setPlaca(e.target.value)} />
+              <input className="input-base" style={{ width: "100%" }} value={placa} onChange={e => setPlaca(e.target.value.toUpperCase())} />
+            </div>
+            <div>
+              <label className="section-label">Consecutivo (tiquete de planta)</label>
+              <input className="input-base" style={{ width: "100%" }} value={consecutivo} placeholder="Ej. 758812"
+                onChange={e => setConsecutivo(e.target.value)} />
             </div>
           </div>
 

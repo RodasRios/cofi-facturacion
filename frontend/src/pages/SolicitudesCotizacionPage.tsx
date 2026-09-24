@@ -31,12 +31,14 @@ export function SolicitudesCotizacionPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [clienteId, setClienteId] = useState("");
+  const [obra, setObra] = useState("");
   const [notas, setNotas] = useState("");
   const [items, setItems] = useState<ItemRow[]>([{ material: "", cantidad: "" }]);
 
   const createMut = useMutation({
     mutationFn: () => createSolicitud({
       cliente: Number(clienteId),
+      obra,
       notas,
       items: items.filter(i => i.material && i.cantidad).map(i => ({ material: Number(i.material), cantidad: Number(i.cantidad) })),
     }),
@@ -44,7 +46,7 @@ export function SolicitudesCotizacionPage() {
       qc.invalidateQueries({ queryKey: ["solicitudes"] });
       toast.success("Solicitud de cotización creada");
       setShowForm(false);
-      setClienteId(""); setNotas(""); setItems([{ material: "", cantidad: "" }]);
+      setClienteId(""); setNotas(""); setObra(""); setItems([{ material: "", cantidad: "" }]);
     },
     onError: () => toast.error("No se pudo crear la solicitud"),
   });
@@ -73,6 +75,11 @@ export function SolicitudesCotizacionPage() {
               </select>
             </div>
             <div>
+              <label className="section-label">Obra</label>
+              <input className="input-base" style={{ width: "100%" }} value={obra} placeholder="Proyecto al que va el material"
+                onChange={e => setObra(e.target.value)} />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
               <label className="section-label">Notas</label>
               <input className="input-base" style={{ width: "100%" }} value={notas} onChange={e => setNotas(e.target.value)} />
             </div>

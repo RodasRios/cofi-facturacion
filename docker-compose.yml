@@ -39,6 +39,7 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       RUN_SEED: ${RUN_SEED:-true}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      COTIZACION_CONSECUTIVO_INICIAL: ${COTIZACION_CONSECUTIVO_INICIAL:-0}
     volumes:
       - facturacion_media:/app/media
     # El backend no se publica a internet: nginx del host solo habla con el

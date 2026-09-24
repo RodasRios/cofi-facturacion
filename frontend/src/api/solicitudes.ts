@@ -7,7 +7,7 @@ export async function getSolicitudes(estado?: string): Promise<SolicitudCotizaci
 }
 
 export async function createSolicitud(data: {
-  cliente: number; notas?: string; items: { material: number; cantidad: number }[];
+  cliente: number; obra?: string; notas?: string; items: { material: number; cantidad: number }[];
 }): Promise<SolicitudCotizacion> {
   const res = await client.post("/solicitudes-cotizacion/", data);
   return res.data;

@@ -23,6 +23,9 @@ class User(models.Model):
     is_active = models.BooleanField(default=True)
     is_admin = models.BooleanField(default=False)
     firma_path = models.CharField(max_length=500, blank=True, null=True)
+    # Aparecen bajo la firma en cotización, orden y control de despachos.
+    cargo = models.CharField(max_length=120, blank=True, null=True)
+    telefono = models.CharField(max_length=40, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -214,6 +217,8 @@ class SolicitudCotizacion(models.Model):
     numero = models.CharField(max_length=50, unique=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name="solicitudes")
     estado = models.CharField(max_length=20, choices=SOLICITUD_ESTADO_CHOICES, default="pendiente")
+    # Obra o proyecto del cliente al que va el material.
+    obra = models.CharField(max_length=200, blank=True, null=True)
     notas = models.TextField(blank=True, null=True)
     creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="solicitudes_creadas")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -455,6 +460,11 @@ class OrdenSuministro(models.Model):
     planta = models.ForeignKey(Planta, on_delete=models.PROTECT, related_name="ordenes_suministro")
     notificada_planta = models.BooleanField(default=False)
     fecha_notificacion = models.DateTimeField(null=True, blank=True)
+    # Se llenan después de emitida la orden, cuando el cliente confirma el
+    # retiro: la planta solo deja entrar los vehículos cuyas placas figuran aquí.
+    fecha_suministro = models.DateField(null=True, blank=True)
+    placas_empresa = models.CharField(max_length=300, blank=True, null=True)
+    placas_cliente = models.CharField(max_length=300, blank=True, null=True)
     notas = models.TextField(blank=True, null=True)
     pdf_path = models.CharField(max_length=500, blank=True, null=True)
     creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="ordenes_creadas")
@@ -475,6 +485,9 @@ class Despacho(models.Model):
     """Formato de Control de Despacho y Recibo de Material (Remisión)."""
     numero = models.CharField(max_length=50, unique=True)
     orden_suministro = models.ForeignKey(OrdenSuministro, on_delete=models.CASCADE, related_name="despachos")
+    # Número del tiquete que emite la planta (p. ej. 758812). No es el REM-xxxx
+    # interno: es el que figura en el control de despachos que se le envía al cliente.
+    consecutivo = models.CharField(max_length=50, blank=True, null=True)
     fecha = models.DateField()
     recibido_por = models.CharField(max_length=200, blank=True, null=True)
     cliente_retira = models.BooleanField(default=True)

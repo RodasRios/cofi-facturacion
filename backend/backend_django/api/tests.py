@@ -551,3 +551,143 @@ class PlantasActivasTest(TestCase):
         r = self.api.patch(f"/api/v1/plantas/{planta.id}/", {"activa": True}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(len(self.api.get("/api/v1/plantas/").json()), 2)
+
+
+@override_settings(GENERATED_PDF_DIR=_TMP_PDFS, COTIZACION_CONSECUTIVO_INICIAL=159)
+class FormatosRealesTest(TestCase):
+    """Cotización FR-GC-08, orden de suministro y control de despacho de materiales."""
+
+    def setUp(self):
+        from datetime import date as _d
+        self._date = _d
+        self.comercial = User(username="paola", nombre="Paola Andrea Posso", rol="comercial",
+                              cargo="Asesora comercial", telefono="3128342898")
+        self.comercial.set_password("x")
+        self.comercial.save()
+        self.aprobador = User(username="apr", rol="aprobador"); self.aprobador.set_password("x"); self.aprobador.save()
+        self.financiera = User(username="fin", rol="financiera"); self.financiera.set_password("x"); self.financiera.save()
+        self.planta_user = User(username="pla", rol="planta", nombre="Valentina Guzmán",
+                                cargo="Asistente administrativa")
+        self.planta_user.set_password("x")
+        self.planta_user.save()
+
+        self.planta = Planta.objects.create(nombre="Planta Corinto")
+        self.material = Material.objects.create(nombre="Sub base granular", unidad_medida="m3")
+        MaterialPlanta.objects.create(material=self.material, planta=self.planta,
+                                      precio_especial=Decimal("41000"), precio_detal=Decimal("44000"))
+        self.cliente = Cliente.objects.create(
+            nombre="Montevilla Construcciones SAS", nit="901571869-0",
+            direccion="Av de las Americas 55 07", telefono="6063330393", numero_vinculacion="VIN-0001")
+        self.api = APIClient()
+
+    def _login(self, u):
+        r = self.api.post("/api/v1/auth/login", {"username": u.username, "password": "x"}, format="json")
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def _hasta_orden(self, cantidad=100):
+        """Solicitud → cotización → aprobación → pago aprobado. Devuelve la orden."""
+        self._login(self.comercial)
+        sol = self.api.post("/api/v1/solicitudes-cotizacion/", {
+            "cliente": self.cliente.id, "obra": "Villa Bosque Nativo",
+            "items": [{"material": self.material.id, "cantidad": cantidad}],
+        }, format="json").json()
+        cot = self.api.post("/api/v1/cotizaciones/", {
+            "solicitud": sol["id"], "planta": self.planta.id,
+            "items": [{"material": self.material.id, "cantidad": cantidad}],
+        }, format="json").json()
+        self._login(self.aprobador)
+        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
+        self._login(self.comercial)
+        pago = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"]}, format="json").json()
+        self._login(self.financiera)
+        self.api.post(f"/api/v1/pagos/{pago['id']}/aprobar/", {"aprobar": True}, format="json")
+        return cot, OrdenSuministro.objects.get(cotizacion_id=cot["id"])
+
+    def test_numeracion_por_anio_sigue_el_consecutivo_real(self):
+        cot, _ = self._hasta_orden()
+        anio = timezone.localdate().year
+        self.assertEqual(cot["numero"], f"160-{anio}")
+
+        from services.pdf_service import numero_cotizacion_formal
+        self.assertEqual(numero_cotizacion_formal("159-2026"), "159-2.026")
+
+    def test_pdf_de_cotizacion_se_genera(self):
+        cot, _ = self._hasta_orden()
+        self._login(self.comercial)
+        r = self.api.get(f"/api/v1/cotizaciones/{cot['id']}/pdf/")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(b"".join(r.streaming_content).startswith(b"%PDF"))
+
+    def test_obra_y_placas_llegan_a_la_orden(self):
+        _, orden = self._hasta_orden()
+        self._login(self.comercial)
+        r = self.api.patch(f"/api/v1/ordenes-suministro/{orden.id}/", {
+            "fecha_suministro": "2026-07-24", "placas_cliente": "spt880, wmb006",
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["obra"], "Villa Bosque Nativo")
+        self.assertEqual(r.json()["placas_cliente"], "spt880, wmb006")
+
+        from api.views.orden_suministro_views import _datos_pdf
+        orden.refresh_from_db()
+        datos = _datos_pdf(orden)
+        self.assertEqual(datos["placas_cliente"], ["SPT880", "WMB006"])
+        self.assertEqual(datos["autoriza"]["nombre"], "Paola Andrea Posso")
+
+    def test_la_orden_no_la_edita_cualquiera(self):
+        _, orden = self._hasta_orden()
+        self._login(self.aprobador)
+        r = self.api.patch(f"/api/v1/ordenes-suministro/{orden.id}/", {"placas_cliente": "X"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_control_de_despachos_valoriza_con_el_precio_cotizado(self):
+        _, orden = self._hasta_orden(cantidad=100)
+        self._login(self.planta_user)
+        for fecha, consecutivo, placa, cant in [
+            ("2026-06-23", "758812", "WMB006", "16.04"),
+            ("2026-07-03", "759304", "SPT880", "15.50"),
+        ]:
+            r = self.api.post("/api/v1/despachos/", {
+                "orden_suministro": orden.id, "fecha": fecha, "consecutivo": consecutivo,
+                "placa_vehiculo": placa, "items": [{"material": self.material.id, "cantidad": cant}],
+            }, format="json")
+            self.assertEqual(r.status_code, 201, r.content)
+
+        from api.views.control_despachos_views import armar_control
+        c = armar_control(self.cliente)
+        self.assertEqual([f["consecutivo"] for f in c["filas"]], ["758812", "759304"])
+        self.assertEqual(c["filas"][0]["obra"], "Villa Bosque Nativo")
+        self.assertEqual(c["filas"][0]["valor_unitario"], Decimal("41000.00"))
+        # 16,04 × 41.000 = 657.640 y 15,50 × 41.000 = 635.500
+        self.assertEqual(c["subtotal"], Decimal("1293140"))
+        self.assertEqual(c["iva"], Decimal("245697"))
+        self.assertEqual(c["total_cantidad"], Decimal("31.54"))
+        self.assertEqual(c["comercial"], self.comercial)
+
+        # Filtro por fechas.
+        solo_julio = armar_control(self.cliente, desde=self._date(2026, 7, 1))
+        self.assertEqual(len(solo_julio["filas"]), 1)
+
+        r = self.api.get("/api/v1/control-despachos/pdf/", {"cliente": self.cliente.id})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b"%PDF"))
+
+
+class DatosDeEjemploTest(TestCase):
+    """La migración 0009 apaga los datos inventados del seed viejo, solo esos."""
+
+    def test_desactiva_solo_los_de_ejemplo(self):
+        import importlib
+        from django.apps import apps as django_apps
+        mig = importlib.import_module("api.migrations.0009_desactivar_datos_de_ejemplo")
+
+        Planta.objects.create(nombre="Planta El Roble")
+        Planta.objects.create(nombre="Planta Corinto")
+        Material.objects.create(nombre="Recebo")
+        Material.objects.create(nombre="Piedra filtro")
+        mig.desactivar(django_apps, None)
+
+        self.assertFalse(Planta.objects.get(nombre="Planta El Roble").activa)
+        self.assertTrue(Planta.objects.get(nombre="Planta Corinto").activa)
+        self.assertFalse(Material.objects.get(nombre="Recebo").activo)
+        self.assertTrue(Material.objects.get(nombre="Piedra filtro").activo)

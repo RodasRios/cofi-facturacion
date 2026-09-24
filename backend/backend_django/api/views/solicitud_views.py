@@ -32,6 +32,7 @@ class SolicitudCotizacionListCreateView(APIView):
         solicitud = SolicitudCotizacion.objects.create(
             numero=_numero_solicitud(),
             cliente=cliente,
+            obra=(d.get("obra") or "").strip() or None,
             notas=d.get("notas"),
             creado_por=request.user,
         )

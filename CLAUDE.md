@@ -252,7 +252,41 @@ Every document-producing model has a sequential `numero` (`SC-0001`, `COT-0001`,
 
 ### PDF generation (`services/pdf_service.py`)
 
-Four generators, one per formato: `generate_vinculacion`, `generate_cotizacion`, `generate_orden_suministro`, `generate_despacho`. All share:
+**Formatos oficiales de la empresa** (calcados de los que Triturados y Concretos
+ya usaba en papel/Excel, tamaño carta, logo en `services/assets/logo_tyc.png`):
+
+- `generate_cotizacion(path, datos)` — **FR-GC-08 Versión 01**. Cuadro con logo
+  en cada página, "Señores:", tabla con una sección por planta ("SUMINISTRO DE
+  PLANTA X 2026"), notas aclaratorias, ubicación de cada planta (`Planta.ubicacion`),
+  observaciones, firma del **comercial que armó la cotización** (no del
+  aprobador) y cuadro Realizó/Revisó/Aprobó. El texto legal está en constantes
+  `_COT_*` — si cambia el formato en papel, se cambia ahí.
+- `generate_orden_suministro(path, datos)` — tabla etiqueta/valor con obra,
+  fecha de suministro, transporte y placas, y "Autorizó" = el comercial.
+- `generate_control_despachos(datos) -> bytes` — el consolidado por cliente
+  ("Archivo data – control despachos" del flujo). **No se guarda**: se arma al
+  vuelo en `GET /control-despachos/pdf/?cliente=&desde=&hasta=&obra=`.
+
+Las tres usan `_on_page_formato()` (o un pie propio) vía `_build_doc(..., on_page=)`.
+Los PDF de cotización y orden **se regeneran cada vez que se abren**, para que
+los documentos viejos salgan con el formato nuevo y la orden refleje las placas
+recién cargadas; los valores no cambian porque los precios de cada línea son
+una foto tomada al crear la cotización.
+
+Numeración de cotizaciones: `NNN-AAAA` por año, impresa como "COT: 160-2.026".
+`COTIZACION_CONSECUTIVO_INICIAL` (env) es el último número emitido fuera del
+sistema, para continuar la numeración real sin saltos.
+
+Datos que alimentan los formatos y se capturan en la app: `SolicitudCotizacion.obra`,
+`OrdenSuministro.fecha_suministro/placas_empresa/placas_cliente` (se editan
+después de emitida, `PATCH /ordenes-suministro/<id>/`, comercial o planta),
+`Despacho.consecutivo` (tiquete de báscula de la planta, distinto del REM
+interno) y `User.cargo/telefono` (salen bajo la firma; se editan en Admin →
+Usuarios). La firma la sube cada usuario desde Cotizaciones o Admin.
+
+**Formatos genéricos** (vinculación y remisión, aún con el estilo anterior):
+
+`generate_vinculacion` and `generate_despacho` share:
 - `_on_page(canvas, doc)` — brand color bar at the top and a footer (page number + "documento generado automáticamente") on every page, wired via `doc.build(elements, onFirstPage=_on_page, onLaterPages=_on_page)` (always go through the `_build_doc()` wrapper, don't call `doc.build()` directly, or the page decoration silently disappears).
 - `_build_header(titulo, numero, fecha)` — empresa name + document title + numero/fecha.
 - `_items_table(items, mostrar_precio=True)` — `mostrar_precio=False` drops the Precio/Subtotal columns entirely (used for `orden_suministro` and `despacho`, which are internal delivery documents, not billing documents — showing price columns full of `-` there was flagged as unprofessional-looking and removed).

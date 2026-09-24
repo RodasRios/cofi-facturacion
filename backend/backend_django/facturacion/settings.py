@@ -66,6 +66,10 @@ MEDIA_URL = "/media/"
 UPLOAD_DIR = MEDIA_ROOT / "uploads"
 GENERATED_PDF_DIR = MEDIA_ROOT / "generated_pdfs"
 
+# Último número de cotización emitido fuera del sistema. Las cotizaciones del
+# sistema siguen desde ahí: con 159, la primera sale 160-2026.
+COTIZACION_CONSECUTIVO_INICIAL = int(os.environ.get("COTIZACION_CONSECUTIVO_INICIAL", "0"))
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "api.auth_backend.FacturacionJWTAuthentication",

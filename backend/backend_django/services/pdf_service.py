@@ -1,14 +1,16 @@
 from pathlib import Path
 from datetime import date
 from decimal import Decimal
-from reportlab.lib.pagesizes import A4
+from io import BytesIO
+from reportlab.lib.pagesizes import A4, LETTER, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, Image
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, Image, PageBreak
 )
-from reportlab.lib.enums import TA_RIGHT
+from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_JUSTIFY, TA_LEFT
+from reportlab.lib.utils import ImageReader
 
 EMPRESA_NOMBRE = "TRITURADOS Y CONCRETOS LTDA"
 EMPRESA_PIE = "Flujo Comercial / Materiales · Triturados, agregados y concretos"
@@ -69,8 +71,15 @@ def _base_doc(path: Path, title: str) -> SimpleDocTemplate:
     )
 
 
-def _build_doc(doc: SimpleDocTemplate, elements: list) -> None:
-    doc.build(elements, onFirstPage=_on_page, onLaterPages=_on_page)
+def _build_doc(doc: SimpleDocTemplate, elements: list, on_page=None) -> None:
+    """Único punto que construye un PDF: garantiza la decoración de página.
+
+    Los formatos oficiales de la empresa (cotización, orden, control de
+    despachos) pasan su propio ``on_page`` con el encabezado del logo; el resto
+    usa la franja de marca genérica.
+    """
+    dibujar = on_page or _on_page
+    doc.build(elements, onFirstPage=dibujar, onLaterPages=dibujar)
 
 
 def _h1() -> ParagraphStyle:
@@ -211,72 +220,6 @@ def _items_table(items: list[dict], mostrar_precio: bool = True) -> Table:
     return t
 
 
-def generate_cotizacion(
-    path: Path, numero: str, fecha: date, cliente_nombre: str, planta_nombre: str,
-    items: list[dict], total: Decimal, firma_path: str | None = None, notas: str | None = None,
-    subtotal: Decimal | None = None, iva: Decimal | None = None,
-    iva_porcentaje: Decimal | None = None, tipo_precio_display: str | None = None,
-) -> None:
-    doc = _base_doc(path, f"Cotización {numero}")
-    elements = _build_header("Formato de Cotización", numero, fecha)
-    datos = [("Cliente", cliente_nombre), ("Planta", planta_nombre)]
-    if tipo_precio_display:
-        datos.append(("Tarifa", tipo_precio_display))
-    elements.append(_build_datos_generales(datos))
-    elements.append(Spacer(1, 14))
-    elements.append(_items_table(items))
-    elements.append(Spacer(1, 10))
-
-    # Subtotal e IVA discriminados: es lo que exige un documento comercial.
-    normal = ParagraphStyle("lin", fontSize=9.5)
-    derecha = ParagraphStyle("lin2", fontSize=9.5, alignment=TA_RIGHT)
-    fuerte = ParagraphStyle("tot", fontSize=11, fontName="Helvetica-Bold", textColor=BRAND_BLUE)
-    fuerte_der = ParagraphStyle("tot2", fontSize=11, fontName="Helvetica-Bold", alignment=TA_RIGHT)
-
-    filas = []
-    if subtotal is not None:
-        pct = f"{Decimal(iva_porcentaje):g}" if iva_porcentaje is not None else "19"
-        filas.append([
-            Paragraph("Subtotal (sin IVA)", normal),
-            Paragraph(f"$ {Decimal(subtotal):,.2f}", derecha),
-        ])
-        filas.append([
-            Paragraph(f"IVA ({pct}%)", normal),
-            Paragraph(f"$ {Decimal(iva or 0):,.2f}", derecha),
-        ])
-    filas.append([
-        Paragraph("<b>TOTAL</b>", fuerte),
-        Paragraph(f"<b>$ {Decimal(total):,.2f}</b>", fuerte_der),
-    ])
-
-    total_table = Table(filas, colWidths=[13.5 * cm, 3.5 * cm])
-    estilo = [
-        ("LINEABOVE", (0, len(filas) - 1), (-1, len(filas) - 1), 1, BRAND_BLUE),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]
-    total_table.setStyle(TableStyle(estilo))
-    elements.append(total_table)
-
-    elements += _build_firma_section(firma_path, "Aprobado por")
-    elements += _build_aclaraciones_section(notas)
-    _build_doc(doc, elements)
-
-
-def generate_orden_suministro(
-    path: Path, numero: str, fecha: date, cliente_nombre: str, planta_nombre: str,
-    items: list[dict], firma_path: str | None = None, notas: str | None = None,
-) -> None:
-    doc = _base_doc(path, f"Orden de Suministro {numero}")
-    elements = _build_header("Formato de Orden de Suministro", numero, fecha)
-    elements.append(_build_datos_generales([("Cliente", cliente_nombre), ("Planta despacho", planta_nombre)]))
-    elements.append(Spacer(1, 14))
-    elements.append(_items_table(items, mostrar_precio=False))
-    elements += _build_firma_section(firma_path, "Autorizado por")
-    elements += _build_aclaraciones_section(notas)
-    _build_doc(doc, elements)
-
-
 def generate_despacho(
     path: Path, numero: str, fecha: date, cliente_nombre: str, planta_nombre: str,
     items: list[dict], recibido_por: str | None = None, placa_vehiculo: str | None = None,
@@ -328,3 +271,634 @@ def generate_vinculacion(
     )
     elements += _build_aclaraciones_section(notas)
     _build_doc(doc, elements)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Formatos oficiales de la empresa
+#
+# Calcados de los formatos que Triturados y Concretos ya usa en papel/Excel:
+# FR-GC-08 (cotización), la orden de suministro y el control de despacho de
+# materiales. Llevan el cuadro con el logo arriba en cada página y el pie con la
+# dirección de la empresa, en tamaño carta como los originales.
+# ═══════════════════════════════════════════════════════════════════════════
+
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo_tyc.png"
+
+EMPRESA_CIUDAD = "Cartago, Valle del Cauca"
+EMPRESA_DIRECCION = "Carrera 4 No. 54-75 Cartago – Valle del Cauca"
+EMPRESA_CELULAR = "312 834 2898"
+EMPRESA_WEB = "https://www.trituradosyconcretos.com/"
+EMPRESA_EMAIL = "comercial@trituradosyconcretos.com"
+
+NARANJA = colors.HexColor("#d2601a")
+LINK_AZUL = colors.HexColor("#1a0dab")
+BORDE = colors.black
+
+
+def _cop(valor) -> str:
+    """Pesos al estilo colombiano: 44.000 (sin decimales, punto de miles)."""
+    return f"{int(round(Decimal(str(valor)))):,}".replace(",", ".")
+
+
+def _cantidad(valor, decimales: int | None = None) -> str:
+    """16,04 / 128 — coma decimal. Sin `decimales`, quita los ceros sobrantes."""
+    d = Decimal(str(valor))
+    d = d.quantize(Decimal(1).scaleb(-decimales)) if decimales is not None else d.normalize()
+    txt = f"{d:f}"
+    if "." in txt:
+        entero, dec = txt.split(".")
+        return f"{int(entero):,}".replace(",", ".") + "," + dec
+    return f"{int(txt):,}".replace(",", ".")
+
+
+def _fecha_carta(d: date) -> str:
+    """marzo 27 de 2026 — como encabeza la empresa sus cartas."""
+    return f"{_MESES_ES[d.month - 1]} {d.day} de {d.year}"
+
+
+def numero_cotizacion_formal(numero: str) -> str:
+    """160-2026 → 160-2.026, como se imprime en el formato FR-GC-08."""
+    if "-" in numero:
+        consecutivo, anio = numero.rsplit("-", 1)
+        if anio.isdigit():
+            return f"{consecutivo}-{int(anio):,}".replace(",", ".")
+    return numero
+
+
+def _on_page_formato(titulo: str, lineas_derecha: list[str]):
+    """Encabezado en cuadro (logo | título | código) + pie con la dirección."""
+
+    def dibujar(canvas, doc):
+        ancho, alto = doc.pagesize
+        canvas.saveState()
+
+        # Cuadro superior de tres celdas, como los formatos de la empresa.
+        bx, bw, bh = 1.9 * cm, ancho - 3.8 * cm, 1.75 * cm
+        by = alto - 1.3 * cm - bh
+        c1, c3 = 4.9 * cm, 4.3 * cm
+        canvas.setStrokeColor(BORDE)
+        canvas.setLineWidth(0.8)
+        canvas.rect(bx, by, bw, bh, stroke=1, fill=0)
+        canvas.line(bx + c1, by, bx + c1, by + bh)
+        canvas.line(bx + bw - c3, by, bx + bw - c3, by + bh)
+
+        if LOGO_PATH.exists():
+            canvas.drawImage(
+                ImageReader(str(LOGO_PATH)), bx + 0.2 * cm, by + 0.18 * cm,
+                width=c1 - 0.4 * cm, height=bh - 0.36 * cm,
+                preserveAspectRatio=True, anchor="c", mask="auto",
+            )
+
+        canvas.setFillColor(colors.black)
+        canvas.setFont("Helvetica-Oblique", 11)
+        canvas.drawCentredString(bx + c1 + (bw - c1 - c3) / 2, by + bh / 2 - 3, titulo)
+
+        canvas.setFont("Helvetica", 9.5)
+        cx = bx + bw - c3 / 2
+        n = len(lineas_derecha)
+        for i, linea in enumerate(lineas_derecha):
+            canvas.drawCentredString(cx, by + bh / 2 + (n - 1) * 6 - i * 12 - 3, linea)
+
+        # Pie con los datos de contacto, centrado.
+        canvas.setFont("Times-BoldItalic", 9)
+        base = 1.55 * cm
+        canvas.drawCentredString(ancho / 2, base + 30, EMPRESA_DIRECCION)
+        canvas.drawCentredString(ancho / 2, base + 20, f"Celular: {EMPRESA_CELULAR}")
+        canvas.setFillColor(LINK_AZUL)
+        canvas.drawCentredString(ancho / 2, base + 10, EMPRESA_WEB)
+        canvas.setFillColor(colors.black)
+        canvas.drawCentredString(ancho / 2, base, f"E-mail: {EMPRESA_EMAIL}")
+
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(GRAY_LABEL)
+        canvas.drawRightString(ancho - 1.9 * cm, 0.8 * cm, f"Página {doc.page}")
+        canvas.restoreState()
+
+    return dibujar
+
+
+def _doc_formato(destino, titulo: str, pagesize=LETTER) -> SimpleDocTemplate:
+    if isinstance(destino, Path):
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino = str(destino)
+    return SimpleDocTemplate(
+        destino, pagesize=pagesize, title=titulo,
+        topMargin=3.6 * cm, bottomMargin=3.4 * cm,
+        leftMargin=2.3 * cm, rightMargin=2.3 * cm,
+    )
+
+
+def _p(texto: str, size=11, bold=False, align=TA_JUSTIFY, leading=None, italic=False, color=colors.black):
+    fuente = "Helvetica-BoldOblique" if bold and italic else (
+        "Helvetica-Bold" if bold else ("Helvetica-Oblique" if italic else "Helvetica"))
+    return Paragraph(texto, ParagraphStyle(
+        "p", fontName=fuente, fontSize=size, leading=leading or size * 1.35,
+        alignment=align, textColor=color,
+    ))
+
+
+def _cuadro_control(filas: list[list[str]], anchos: list[float]) -> Table:
+    """Cuadro Realizó / Revisó / Aprobó del sistema de gestión documental."""
+    datos = [[_p(c, size=8.5, align=TA_LEFT, leading=10.5) for c in fila] for fila in filas]
+    t = Table(datos, colWidths=anchos)
+    t.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.6, BORDE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return t
+
+
+def _bloque_firma(firmante: dict) -> list:
+    """Firma del comercial: imagen guardada (si subió una) + nombre y datos."""
+    elementos = []
+    firma = firmante.get("firma_path")
+    if firma and Path(firma).exists():
+        try:
+            elementos.append(Image(firma, width=4 * cm, height=1.9 * cm, kind="proportional", hAlign="LEFT"))
+        except Exception:
+            elementos.append(Spacer(1, 1.6 * cm))
+    else:
+        elementos.append(Spacer(1, 1.6 * cm))
+    elementos.append(_p(f"<b>{(firmante.get('nombre') or '').upper()}</b>", size=11, align=TA_LEFT))
+    if firmante.get("cargo"):
+        elementos.append(_p(firmante["cargo"], size=11, align=TA_LEFT))
+    if firmante.get("telefono"):
+        elementos.append(_p(f"Cel.: {firmante['telefono']}", size=11, align=TA_LEFT))
+    correo = firmante.get("email") or EMPRESA_EMAIL
+    elementos.append(_p(
+        f'Correo: <font color="#1a0dab"><u>{correo}</u></font>', size=11, align=TA_LEFT))
+    return elementos
+
+
+# ─── Cotización FR-GC-08 ───────────────────────────────────────────────────
+
+_COT_INTRO = (
+    "Reciba un cordial saludo en nombre de Triturados y Concretos Ltda., una empresa con "
+    "más de veinte (20) años de experiencia en la producción y suministro de agregados "
+    "pétreos, mezclas asfálticas, concreto hidráulico y construcción de obras de ingeniería "
+    "civil, ahora con el ánimo de expandir nuestros servicios, ofrecemos nuestras nuevas "
+    "líneas de negocio, por una parte “Soluciones de Ingeniería Metalmecánica - SIM”, un "
+    "área dedicada al mantenimiento y montaje de equipos industriales y estructuras "
+    "metálicas y, por otra parte, “Prefabricados” para el mercado de la construcción y la industria."
+)
+
+_COT_NOTAS = [
+    "Los materiales pétreos suministrados por Triturados y Concretos Ltda. son producidos bajo "
+    "los estándares de calidad establecidos por el Instituto Nacional de Vías – INVIAS y cumplen "
+    "con las especificaciones técnicas exigidas por dicha entidad.",
+    "El valor de los materiales pétreos fue calculado con base en los precios vigentes a la fecha "
+    "de la cotización y considerando despachos en jornada diurna. Cualquier variación en los costos "
+    "de insumos, combustibles o condiciones operativas, así como requerimientos de despacho en "
+    "jornada nocturna, podrá generar ajustes en los valores cotizados, previa validación por parte "
+    "de Triturados y Concretos Ltda.",
+    "La presente oferta no contempla deducciones propias del sector público. Los valores cotizados "
+    "fueron estructurados considerando únicamente los descuentos de ley de carácter general, tales "
+    "como la retención en la fuente por concepto de compras. Cualquier deducción adicional que "
+    "aplique según la naturaleza del contratante deberá ser asumida por el cliente o ajustada en la "
+    "facturación correspondiente.",
+    "El valor del material incluye el cargue en la volqueta en planta. El transporte será "
+    "responsabilidad del cliente, salvo acuerdo expreso en contrario.",
+    "El pedido de material deberá programarse con una anticipación mínima de ocho (8) días "
+    "calendario y el despacho se realizará siempre y cuando la planta se encuentre habilitada para "
+    "labores operativas.",
+    "Los tiempos de cargue podrán variar de acuerdo con la demanda y las condiciones operativas de la planta.",
+    "Se recomienda al cliente verificar el cubicaje de la volqueta en planta y retirar muestra del "
+    "material para la realización de los ensayos correspondientes.",
+    "Triturados y Concretos Ltda. no se hace responsable por daños, pérdidas o alteraciones del "
+    "material una vez este haya sido cargado en la volqueta y haya salido de planta.",
+    "El retiro del material deberá efectuarse dentro de los cuatro (4) meses siguientes a la fecha "
+    "de pago. Vencido dicho plazo, el material pendiente de despacho quedará sujeto a los precios y "
+    "condiciones vigentes al momento del retiro.",
+]
+
+_COT_NOTAS_FINALES = [
+    "<b>HORARIO DE PLANTA:</b> El horario de despacho de la planta es de lunes a jueves de 7am a "
+    "3:30 pm, viernes de 7 am a 2:30 pm, sábados de 7 am a 10:30 am, domingos y festivos no hay "
+    "servicio de despacho.",
+    "La documentación ambiental y de calidad será entregada una vez exista un acuerdo comercial formalizado.",
+    "Una vez realizado el pago, Triturados y Concretos Ltda. no realizará devoluciones de dinero por "
+    "saldos a favor. Dichos saldos serán reconocidos mediante la entrega de materiales, de forma "
+    "proporcional al valor pendiente de compensar.",
+    "Se recomienda verificar el cubicaje de la volqueta en planta con el fin de evitar diferencias "
+    "en las cantidades de material entregadas.",
+    "Los precios aquí estipulados podrán presentar variaciones en función de las condiciones del "
+    "mercado, costos de insumos y condiciones operativas, sin previo aviso.",
+]
+
+_COT_OBSERVACIONES = [
+    "La presente cotización es de carácter informativo y no constituye una obligación ni promesa de "
+    "suministro por parte de Triturados y Concretos Ltda. El suministro se entenderá formalizado "
+    "únicamente una vez el cliente notifique mediante la emisión de una Orden de Compra, junto con su "
+    "respectivo anexo de condiciones en caso de ser necesario, la cual formaliza el acuerdo de "
+    "voluntades. Dicha Orden de Compra no podrá ser cedida total ni parcialmente sin el consentimiento "
+    "previo y expreso de Triturados y Concretos Ltda.",
+    "Posterior a esto, el cliente puede realizar el pago y enviar el comprobante de consignación al "
+    f"correo electrónico {EMPRESA_EMAIL} o al WhatsApp 3128342898.",
+    "Una vez confirmado el ingreso del pago por parte de la entidad bancaria, se procederá a autorizar "
+    "el despacho del material, para lo cual el cliente deberá suministrar previamente las placas de los "
+    "vehículos autorizados para el ingreso a planta.",
+    "Los certificados de retención en la fuente deberán ser expedidos y entregados inmediatamente una "
+    "vez se realicen los pagos de las facturas correspondientes.",
+]
+
+_COT_TRANSPORTE = [
+    "Presentar Cédula de ciudadanía, Licencia de conducción y Planilla de seguridad social vigente del "
+    "conductor que vaya a ingresar a las instalaciones de forma temporal o permanente según "
+    "normatividad al respecto.",
+    "Tarjeta de propiedad, soat y revisión técnico-mecánica.",
+    "La afiliación a ARL de los transportadores debe ser por mínimo riesgo 5.",
+    "No se ingresará bajo efectos de alcohol o sustancias psicoactivas.",
+    "Acatará todas las recomendaciones de seguridad durante su actividad en las instalaciones de "
+    "Triturados y Concretos Ltda., así mismo respetará al interior de las plantas, los límites de "
+    "acceso restringido para personal externo.",
+    "No está autorizado el ingreso de menores de edad a las plantas de Triturados y Concretos Ltda.",
+    "No está permitido realizar labores de mantenimiento a vehículos en el interior de las instalaciones",
+    "Si se presenta un derrame de líquidos que provengan de los vehículos, el responsable de la "
+    "limpieza y recolección es el conductor.",
+    "EPP - Usar todos los Elementos de Protección Personal requeridos (botas con puntera, casco, "
+    "guantes, chaleco reflectivo etc.), no es permitido utilizar anillos, relojes o joyas.",
+]
+
+
+def _viñeta(texto: str, marca: str = "•") -> Paragraph:
+    return Paragraph(texto, ParagraphStyle(
+        "vin", fontName="Helvetica", fontSize=11, leading=15, alignment=TA_JUSTIFY,
+        leftIndent=0.9 * cm, bulletIndent=0.25 * cm, spaceAfter=2,
+    ), bulletText=marca)
+
+
+def _tabla_cotizacion(grupos: list[dict], subtotal, iva, iva_pct, total, anio: int) -> Table:
+    """Una sección por planta (SUMINISTRO DE PLANTA X 2026) y totales al final."""
+    anchos = [1.1 * cm, 7.0 * cm, 1.7 * cm, 1.8 * cm, 3.0 * cm, 2.6 * cm]
+    fila_style = ParagraphStyle("c", fontName="Helvetica", fontSize=8, leading=9.5)
+    datos, estilo, item = [], [], 1
+
+    for g in grupos:
+        r = len(datos)
+        datos.append([f"SUMINISTRO DE {g['planta'].upper()} {anio}", "", "", "", "", ""])
+        estilo += [("SPAN", (0, r), (-1, r)), ("FONTNAME", (0, r), (-1, r), "Helvetica-Bold"),
+                   ("ALIGN", (0, r), (-1, r), "CENTER")]
+        datos.append(["ITEM", "DESCRIPCION", "UNIDAD", "CANTIDAD", "VR. UNIT. SIN IVA", "SUB TOTAL"])
+        estilo += [("FONTNAME", (0, r + 1), (-1, r + 1), "Helvetica-Bold"),
+                   ("ALIGN", (0, r + 1), (-1, r + 1), "CENTER"),
+                   ("LINEABOVE", (0, r + 1), (-1, r + 1), 1.2, BORDE)]
+        for it in g["items"]:
+            datos.append([
+                str(item), Paragraph(it["descripcion"].upper(), fila_style),
+                (it["unidad"] or "").upper(), _cantidad(it["cantidad"]),
+                f"$ {_cop(it['precio'])}",
+                f"$ {_cop(it['subtotal'])}",
+            ])
+            fila = len(datos) - 1
+            estilo += [("ALIGN", (0, fila), (0, fila), "CENTER"),
+                       ("ALIGN", (2, fila), (3, fila), "CENTER"),
+                       ("ALIGN", (4, fila), (5, fila), "RIGHT")]
+            item += 1
+
+    r = len(datos)
+    for etiqueta, valor, negrilla in (
+        ("SUBTOTAL", subtotal, False), (f"IVA", iva, False), ("TOTAL", total, True),
+    ):
+        datos.append(["", "", "", "", etiqueta, f"$ {_cop(valor)}"])
+    estilo += [
+        ("SPAN", (0, r), (3, r + 2)),
+        ("FONTNAME", (4, r), (4, r + 2), "Helvetica-Bold"),
+        ("FONTNAME", (5, r + 2), (5, r + 2), "Helvetica-Bold"),
+        ("ALIGN", (5, r), (5, r + 2), "RIGHT"),
+    ]
+
+    t = Table(datos, colWidths=anchos, repeatRows=0)
+    t.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, BORDE),
+        ("BOX", (0, 0), (-1, -1), 1, BORDE),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ] + estilo))
+    return t
+
+
+def generate_cotizacion(path: Path, datos: dict) -> None:
+    """Formato FR-GC-08.
+
+    datos: numero, fecha, cliente {nombre, nit, telefono, email}, grupos
+    [{planta, items [{descripcion, unidad, cantidad, precio, subtotal}]}],
+    subtotal, iva, iva_porcentaje, total, plantas [(nombre, ubicacion)],
+    firmante {nombre, cargo, telefono, email, firma_path}, notas.
+    """
+    fecha: date = datos["fecha"]
+    doc = _doc_formato(path, f"Cotización {datos['numero']}")
+    cli = datos["cliente"]
+    e = [
+        Spacer(1, 4),
+        _p(f"<b>{EMPRESA_CIUDAD}, {_fecha_carta(fecha)}.</b>", size=12, align=TA_LEFT),
+        Spacer(1, 16),
+        _p(f"<b>COT: {numero_cotizacion_formal(datos['numero'])}</b>", size=12, align=TA_RIGHT),
+        Spacer(1, 18),
+        _p("“Recuerda que la calidad de los materiales de construcción es uno de los factores que, "
+           "con un adecuado diseño e instalación, garantizan el éxito y durabilidad de las obras”.",
+           size=8.5, align=TA_CENTER),
+        Spacer(1, 14),
+        _p("<b>Señores:</b>", size=12, align=TA_LEFT),
+        _p(f"<b>{(cli.get('nombre') or '').upper()}</b>", size=12, align=TA_LEFT, leading=17),
+    ]
+    if cli.get("nit"):
+        e.append(_p(f"<b>NIT:</b> {cli['nit']}", size=12, align=TA_LEFT, leading=17))
+    if cli.get("telefono"):
+        e.append(_p(f"<b>Teléfono:</b> {cli['telefono']}", size=12, align=TA_LEFT, leading=17))
+    if cli.get("email"):
+        e.append(_p(f'<b>Correo electrónico:</b> <font color="#1a0dab"><u>{cli["email"]}</u></font>',
+                    size=12, align=TA_LEFT, leading=17))
+    e += [
+        Spacer(1, 14),
+        _p("REF: <b>SUMINISTRO DE GRANULARES PLANTA TRITURADOS Y CONCRETOS LTDA.</b>", size=11, align=TA_LEFT),
+        Spacer(1, 12),
+        _p(_COT_INTRO, size=11.5, leading=16),
+        Spacer(1, 12),
+        _p("Agradezco de ante mano su confianza en nuestra empresa y en respuesta a su solicitud me "
+           "permito presentar la propuesta económica de los materiales requeridos:", size=11.5, leading=16),
+        Spacer(1, 16),
+        _tabla_cotizacion(datos["grupos"], datos["subtotal"], datos["iva"],
+                          datos["iva_porcentaje"], datos["total"], fecha.year),
+        Spacer(1, 16),
+        _p("<b>Validez de la oferta:</b> 15 días.", align=TA_LEFT),
+        _p("<b>Forma de pago:</b> Anticipado.", align=TA_LEFT),
+        Spacer(1, 10),
+        _p("<b>NOTAS ACLARATORIAS:</b>", align=TA_LEFT),
+        Spacer(1, 4),
+    ]
+    e += [_viñeta(n) for n in _COT_NOTAS]
+
+    for nombre, ubicacion in datos.get("plantas", []):
+        texto = f"<b>UBICACIÓN DE LA PLANTA:</b> El suministro se contempla en la {nombre}"
+        texto += f", ubicada en {ubicacion}." if ubicacion else "."
+        e.append(_viñeta(texto))
+
+    e += [_viñeta(n) for n in _COT_NOTAS_FINALES]
+    if datos.get("notas"):
+        e.append(_viñeta(f"<b>NOTA:</b> {datos['notas']}"))
+
+    e += [Spacer(1, 12), _p("<b>Observaciones.</b>", align=TA_LEFT), Spacer(1, 4)]
+    for texto in _COT_OBSERVACIONES:
+        e += [_p(texto, leading=15), Spacer(1, 8)]
+
+    e += [Spacer(1, 10), _p("Atentamente,", align=TA_LEFT)]
+    e += _bloque_firma(datos["firmante"])
+
+    e += [
+        PageBreak(),
+        _p("<b>NOTAS IMPORTANTE-TRANSPORTE DE MATERIALES.</b>", align=TA_LEFT),
+        Spacer(1, 8),
+        _p("Estimado cliente nuestra seguridad y la suya es muy importante para nosotros por favor "
+           "tener en cuenta las siguientes obligaciones para el ingreso de los vehículos de carga a "
+           "nuestras instalaciones:", leading=15),
+        Spacer(1, 6),
+    ]
+    e += [_viñeta(t, marca="✓") for t in _COT_TRANSPORTE]
+    e += [
+        Spacer(1, 24),
+        _cuadro_control(
+            [["Realizó: Líder Gestión Comercial", "Revisó: Gerencia Asesor externo", "Aprobó: Gerencia"],
+             ["Fecha de creación: 16-06-2022", "Fecha de revisión: 18-08-2022",
+              "Fecha de aprobación: 18-08-2022"]],
+            [5.8 * cm, 5.8 * cm, 5.4 * cm],
+        ),
+    ]
+    _build_doc(doc, e, on_page=_on_page_formato("COTIZACIÓN", ["FR-GC-08", "Versión:01"]))
+
+
+# ─── Orden de suministro ───────────────────────────────────────────────────
+
+def generate_orden_suministro(path: Path, datos: dict) -> None:
+    """Formato de orden de suministro.
+
+    datos: numero, fecha, cliente, obra, planta, items [{material, cantidad,
+    unidad}], fecha_suministro, placas_empresa [..], placas_cliente [..],
+    observacion, autoriza {nombre, area}.
+    """
+    doc = _doc_formato(path, f"Orden de suministro {datos['numero']}")
+    lbl = ParagraphStyle("l", fontName="Helvetica-Bold", fontSize=11, leading=13)
+    val = ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=11, leading=13, alignment=TA_CENTER)
+
+    def fila(etiqueta, valor):
+        return [Paragraph(etiqueta, lbl), "", Paragraph(valor or "", val), ""]
+
+    items = datos["items"]
+    unidad = (items[0]["unidad"] if items else "m3").upper()
+    mismas_unidades = len({(i["unidad"] or "").lower() for i in items}) <= 1
+
+    filas = [
+        fila("FECHA", datos["fecha"].strftime("%d/%m/%Y")),
+        fila("NOMBRE DEL CLIENTE O RAZON SOCIAL", (datos["cliente"] or "").upper()),
+        fila("OBRA", (datos.get("obra") or "").upper()),
+        fila("CODIGO", "SUMINISTRO"),
+    ]
+    for it in items:
+        u = (it["unidad"] or "").upper()
+        filas.append(fila("MATERIAL", it["material"].upper()))
+        filas.append(fila(f"CANTIDAD ({u})", f"{_cantidad(it['cantidad'])} {u}"))
+    filas += [
+        fila("PLANTA", datos["planta"].upper().replace("PLANTA ", "")),
+        fila("FECHA SUMINISTRO",
+             datos["fecha_suministro"].strftime("%d/%m/%Y") if datos.get("fecha_suministro") else ""),
+    ]
+    if mismas_unidades and items:
+        total = sum(Decimal(str(i["cantidad"])) for i in items)
+        filas.append(fila(f"CANTIDAD TOTAL PEDIDO ({unidad})", f"{_cantidad(total)} {unidad}"))
+
+    n_datos = len(filas)
+    filas.append([Paragraph("TRANSPORTE", val), "", "", ""])
+    filas.append([Paragraph("TRITURADOS Y CONCRETOS", val), "", Paragraph("CLIENTE", val), ""])
+
+    empresa = datos.get("placas_empresa") or []
+    cliente = datos.get("placas_cliente") or []
+    n_placas = max(3, len(empresa), len(cliente))
+    ini_placas = len(filas)
+    for i in range(n_placas):
+        filas.append([
+            Paragraph("PLACAS VEHICULOS", val) if i == 0 else "",
+            Paragraph(empresa[i], val) if i < len(empresa) else "",
+            Paragraph(cliente[i], val) if i < len(cliente) else "",
+            "",
+        ])
+    obs = len(filas)
+    filas.append([Paragraph("<i>OBSERVACION</i>", val), Paragraph(datos.get("observacion") or "",
+                  ParagraphStyle("o", fontName="Helvetica", fontSize=10, leading=12)), "", ""])
+    aut = len(filas)
+    autoriza = datos.get("autoriza") or {}
+    filas.append([Paragraph("AUTORIZO", val), Paragraph((autoriza.get("nombre") or "").upper(), val), "", ""])
+    filas.append(["", Paragraph(autoriza.get("area") or "ÁREA COMERCIAL",
+                                ParagraphStyle("a", fontName="Helvetica", fontSize=10, alignment=TA_CENTER)), "", ""])
+
+    anchos = [5.4 * cm, 3.6 * cm, 3.6 * cm, 4.4 * cm]
+    estilo = [
+        ("GRID", (0, 0), (-1, -1), 0.6, BORDE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("SPAN", (0, n_datos), (-1, n_datos)),
+        ("SPAN", (0, n_datos + 1), (1, n_datos + 1)),
+        ("SPAN", (2, n_datos + 1), (3, n_datos + 1)),
+        ("SPAN", (0, ini_placas), (0, ini_placas + n_placas - 1)),
+        ("SPAN", (2, ini_placas), (3, ini_placas)),
+        ("SPAN", (1, obs), (-1, obs)),
+        ("SPAN", (1, aut), (-1, aut)),
+        ("SPAN", (1, aut + 1), (-1, aut + 1)),
+        ("SPAN", (0, aut), (0, aut + 1)),
+    ]
+    for r in range(n_datos):
+        estilo += [("SPAN", (0, r), (1, r)), ("SPAN", (2, r), (3, r))]
+    # Filas alternas en gris claro, como el formato en Excel.
+    for r in range(0, n_datos, 2):
+        estilo.append(("BACKGROUND", (0, r), (-1, r), colors.HexColor("#efefef")))
+    for r in range(ini_placas + 1, ini_placas + n_placas):
+        estilo.append(("SPAN", (2, r), (3, r)))
+
+    t = Table(filas, colWidths=anchos)
+    t.setStyle(TableStyle(estilo))
+
+    e = [
+        Spacer(1, 10),
+        t,
+        Spacer(1, 22),
+        _cuadro_control(
+            [["Realizó:", "Revisó:", "Aprobó:"],
+             ["Líder Gestión comercial", "Gerencia, Asesor externo", "Gerencia"],
+             ["Fecha creación: 16-06-2022", "Fecha de revisión:", "Fecha de aprobación:"]],
+            [8.0 * cm, 4.8 * cm, 4.2 * cm],
+        ),
+    ]
+    _build_doc(doc, e, on_page=_on_page_formato("ORDEN DE SUMINISTRO", [datos["numero"]]))
+
+
+# ─── Control de despacho de materiales ─────────────────────────────────────
+
+def generate_control_despachos(datos: dict) -> bytes:
+    """Consolidado por cliente de lo despachado, con valores. Devuelve el PDF.
+
+    No se guarda en disco: es un reporte que se arma al vuelo con el rango
+    pedido, no un formato emitido una sola vez.
+
+    datos: cliente {nombre, nit, direccion, telefono}, filas [{planta, fecha,
+    consecutivo, empresa, obra, placa, material, cantidad, valor_unitario,
+    valor_total}], total_cantidad, subtotal, iva_porcentaje, iva, total,
+    elaboro {nombre, cargo}, reviso {nombre, cargo}.
+    """
+    buf = BytesIO()
+    pagina = landscape(LETTER)
+    doc = SimpleDocTemplate(
+        buf, pagesize=pagina, title="Control de despacho de materiales",
+        topMargin=1.2 * cm, bottomMargin=1.4 * cm, leftMargin=1.2 * cm, rightMargin=1.2 * cm,
+    )
+    ancho_util = pagina[0] - 2.4 * cm
+
+    logo = (Image(str(LOGO_PATH), width=5.6 * cm, height=1.7 * cm, kind="proportional")
+            if LOGO_PATH.exists() else "")
+    titulo = Table([["CONTROL DE DESPACHO DE MATERIALES"]], colWidths=[ancho_util - 7 * cm])
+    titulo.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 1, BORDE),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 11),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+    ]))
+    cabecera = Table([[logo, titulo]], colWidths=[7 * cm, ancho_util - 7 * cm])
+    cabecera.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+
+    cli = datos["cliente"]
+    et = ParagraphStyle("et", fontName="Helvetica-Bold", fontSize=9.5, alignment=TA_RIGHT, leading=12)
+    vl = ParagraphStyle("vl", fontName="Helvetica-Bold", fontSize=9.5, leading=12)
+    contratante = Table([
+        [Paragraph("CONTRATANTE:", et), Paragraph((cli.get("nombre") or "").upper(), vl)],
+        [Paragraph("NIT:", et), Paragraph(cli.get("nit") or "-", vl)],
+        [Paragraph("Dirección:", et), Paragraph(cli.get("direccion") or "-", vl)],
+        [Paragraph("Teléfono", et), Paragraph(cli.get("telefono") or "-", vl)],
+    ], colWidths=[3.4 * cm, 14 * cm], hAlign="LEFT")
+    contratante.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 1),
+                                     ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
+
+    celda = ParagraphStyle("cd", fontName="Helvetica", fontSize=7.5, leading=9)
+    enc = ["PLANTA", "FECHA", "CODIGO", "CONSECUTIVO", "EMPRESA", "OBRA", "PLACA",
+           "MATERIAL", "CANTIDAD", "VALOR M3", "VALOR TOTAL"]
+    anchos = [2.0, 1.8, 2.0, 2.1, 4.6, 3.3, 1.7, 3.4, 1.7, 1.9, 2.3]
+    escala = ancho_util / (sum(anchos) * cm)
+    anchos = [a * cm * escala for a in anchos]
+
+    filas = [enc]
+    for f in datos["filas"]:
+        filas.append([
+            Paragraph(f["planta"], celda), f["fecha"].strftime("%d/%m/%Y"), "SUMINISTRO",
+            f.get("consecutivo") or "-", Paragraph((f["empresa"] or "").upper(), celda),
+            Paragraph((f.get("obra") or "-").upper(), celda), (f.get("placa") or "-").upper(),
+            Paragraph(f["material"].upper(), celda), _cantidad(f["cantidad"], 2),
+            f"$ {_cop(f['valor_unitario'])}", f"$ {_cop(f['valor_total'])}",
+        ])
+    if len(filas) == 1:
+        filas.append(["Sin despachos en el período seleccionado", "", "", "", "", "", "", "", "", "", ""])
+
+    t = Table(filas, colWidths=anchos, repeatRows=1)
+    estilo = [
+        ("BACKGROUND", (0, 0), (-1, 0), NARANJA),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (8, 1), (-1, -1), "RIGHT"),
+        ("ALIGN", (1, 1), (3, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor("#d9d9d9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]
+    if not datos["filas"]:
+        estilo.append(("SPAN", (0, 1), (-1, 1)))
+    t.setStyle(TableStyle(estilo))
+
+    ult = anchos[-3:]
+    total_m3 = Table([["TOTAL m3", _cantidad(datos["total_cantidad"], 2)]],
+                     colWidths=[sum(anchos[7:8]), anchos[8]], hAlign="RIGHT")
+    total_m3.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, BORDE), ("INNERGRID", (0, 0), (-1, -1), 0.8, BORDE),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+    ]))
+    pct = f"{Decimal(str(datos['iva_porcentaje'])):g}"
+    totales = Table([
+        ["SUBTOTAL", "$", _cop(datos["subtotal"])],
+        [f"IVA {pct}%", "$", _cop(datos["iva"])],
+        ["TOTAL", "$", _cop(datos["total"])],
+    ], colWidths=[ult[0], 0.5 * cm, ult[2] + ult[1] - 0.5 * cm], hAlign="RIGHT")
+    totales.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+        ("ALIGN", (0, 0), (0, -1), "RIGHT"), ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+    ]))
+
+    def bloque(titulo_bloque, persona):
+        persona = persona or {}
+        return [
+            [Paragraph(f"<b>{titulo_bloque}</b>", vl), ""],
+            [Paragraph("<b>Nombre:</b>", vl), Paragraph((persona.get("nombre") or "").upper(), vl)],
+            [Paragraph("<b>Cargo:</b>", vl), Paragraph((persona.get("cargo") or "").upper(), vl)],
+        ]
+
+    izq = Table(bloque("Elaboró:", datos.get("elaboro")), colWidths=[2.2 * cm, 8 * cm])
+    der = Table(bloque("Revisó:", datos.get("reviso")), colWidths=[2.2 * cm, 8 * cm])
+    firmas = Table([[izq, der]], colWidths=[ancho_util / 2, ancho_util / 2])
+
+    e = [cabecera, Spacer(1, 10), contratante, Spacer(1, 10), t, Spacer(1, 8), total_m3,
+         Spacer(1, 8), totales, Spacer(1, 22), firmas]
+
+    def pie(canvas, d):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(GRAY_LABEL)
+        canvas.drawString(1.2 * cm, 0.7 * cm, f"{EMPRESA_NOMBRE} · {EMPRESA_DIRECCION} · {EMPRESA_EMAIL}")
+        canvas.drawRightString(pagina[0] - 1.2 * cm, 0.7 * cm, f"Página {d.page}")
+        canvas.restoreState()
+
+    _build_doc(doc, e, on_page=pie)
+    return buf.getvalue()

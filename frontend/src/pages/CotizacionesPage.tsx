@@ -8,6 +8,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Icon } from "../components/ui/Icon";
 import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 import { RepartoPlantas } from "../components/RepartoPlantas";
+import { MiFirma } from "../components/MiFirma";
 import { repartoInicial, repartoValido, repartoAItems, type Reparto } from "../lib/reparto";
 import type { CotizacionEstado } from "../types";
 
@@ -92,6 +93,8 @@ export function CotizacionesPage() {
           <Icon name="add" size={16} />Nueva cotización
         </button>
       </div>
+
+      {(user?.is_admin || user?.rol === "comercial") && !user?.firma_path && <MiFirma />}
 
       {showForm && (
         <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={(e) => { e.preventDefault(); createMut.mutate(); }}>

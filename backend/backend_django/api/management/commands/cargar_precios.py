@@ -51,12 +51,14 @@ MATERIALES = {
     "Emulsión": ("otro", GALON),
 }
 
-# planta -> (vigencia, [(material, precio especial, precio detal)])
+# planta -> (ubicación, [(material, precio especial, precio detal)])
+# La ubicación sale en la cotización ("El suministro se contempla en la Planta
+# X, ubicada en ..."). None = no la conocemos todavía; se completa en el panel.
 # El precio detal en None significa que esa planta no maneja esa tarifa; al
 # cotizar a un cliente de detal se usa entonces el precio especial.
 PLANTAS = {
     "Planta Río Frío": (
-        "Vigente desde el 15 de enero de 2026 · Fuente DCG Constructora",
+        None,
         [
             ("Base granular tipo INVIAS", 65000, 65000),
             ("Sub base granular tipo INVIAS", 50000, 50000),
@@ -68,14 +70,14 @@ PLANTAS = {
         ],
     ),
     "Planta Catarina": (
-        "Vigente desde el 15 de enero de 2026",
+        None,
         [
             ("Base granular tipo INVIAS", 43000, None),
             ("Sub base granular tipo INVIAS", 39000, None),
         ],
     ),
     "Planta Portobelo": (
-        "Vigente desde el 22 de julio de 2026",
+        "Vía Panorama entre Ansermanuevo – La Virginia PR 137 + 250",
         [
             ("Base granular tipo INVIAS Clase A", 65000, 68000),
             ("Base granular tipo INVIAS Clase B", 54000, 61000),
@@ -98,7 +100,7 @@ PLANTAS = {
         ],
     ),
     "Planta Corinto": (
-        "Vigente desde el 15 de enero de 2026",
+        None,
         [
             ("Sub base granular tipo INVIAS", 41000, 44000),
             ("Piedra mezclada", 44000, 54000),
@@ -106,7 +108,7 @@ PLANTAS = {
         ],
     ),
     "Planta Zabaleta": (
-        "Vigente desde el 15 de abril de 2026",
+        None,
         [
             ("Gravilla 3/4", 29500, 35000),
             ("Arena gruesa", 38000, 52500),
@@ -116,7 +118,7 @@ PLANTAS = {
         ],
     ),
     "Planta La Vieja": (
-        "Lista 2026",
+        None,
         [
             ("Arena natural", 48000, None),
             ("Base granular tipo INVIAS", 50000, None),
@@ -156,7 +158,13 @@ class Command(BaseCommand):
             planta, _ = Planta.objects.get_or_create(
                 nombre=nombre_planta, defaults={"ubicacion": ubicacion},
             )
-            planta.ubicacion, planta.activa = ubicacion, True
+            # No pisar una ubicación que alguien completó en el panel. Solo se
+            # escribe si el catálogo la trae, o si lo guardado es la vigencia de
+            # precios que una versión anterior de este comando metió aquí por error.
+            actual = planta.ubicacion or ""
+            if ubicacion or actual.startswith(("Vigente desde", "Lista 20")):
+                planta.ubicacion = ubicacion
+            planta.activa = True
             planta.save(update_fields=["ubicacion", "activa"])
 
             for nombre_material, especial, detal in lista:

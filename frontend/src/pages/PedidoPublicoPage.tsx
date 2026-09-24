@@ -22,6 +22,7 @@ export function PedidoPublicoPage() {
   });
 
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
+  const [obra, setObra] = useState("");
   const [notas, setNotas] = useState("");
 
   const seleccionados = Object.entries(cantidades)
@@ -29,7 +30,9 @@ export function PedidoPublicoPage() {
     .map(([material, v]) => ({ material: Number(material), cantidad: Number(v) }));
 
   const enviar = useMutation({
-    mutationFn: () => enviarPedido(token, { items: seleccionados, notas: notas || undefined }),
+    mutationFn: () => enviarPedido(token, {
+      items: seleccionados, obra: obra || undefined, notas: notas || undefined,
+    }),
   });
 
   const detalleDe = (e: unknown, fallback: string) =>
@@ -75,7 +78,7 @@ export function PedidoPublicoPage() {
               <button
                 className="btn-secondary"
                 style={{ marginTop: 10 }}
-                onClick={() => { enviar.reset(); setCantidades({}); setNotas(""); }}
+                onClick={() => { enviar.reset(); setCantidades({}); setObra(""); setNotas(""); }}
               >
                 <Icon name="add" size={14} />Hacer otra solicitud
               </button>
@@ -111,7 +114,12 @@ export function PedidoPublicoPage() {
               </div>
 
               <div className="form-field" style={{ marginTop: 12 }}>
-                <label className="form-label">Observaciones (obra, fecha requerida, etc.)</label>
+                <label className="form-label">Obra o proyecto</label>
+                <input className="input-base" value={obra} onChange={e => setObra(e.target.value)} />
+              </div>
+
+              <div className="form-field" style={{ marginTop: 12 }}>
+                <label className="form-label">Observaciones (fecha requerida, etc.)</label>
                 <input className="input-base" value={notas} onChange={e => setNotas(e.target.value)} />
               </div>
 

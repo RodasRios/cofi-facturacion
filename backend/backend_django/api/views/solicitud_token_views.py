@@ -125,6 +125,7 @@ class SolicitudPublicaView(APIView):
             solicitud = SolicitudCotizacion.objects.create(
                 numero=_numero_solicitud(),
                 cliente=ct.cliente,
+                obra=(request.data.get("obra") or "").strip()[:200] or None,
                 notas=request.data.get("notas"),
                 # La pidió el cliente, no un usuario del sistema. Se atribuye a
                 # quien generó el link para que la solicitud tenga dueño.

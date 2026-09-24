@@ -17,36 +17,66 @@ logger = logging.getLogger(__name__)
 
 
 def _numero_cotizacion():
-    count = Cotizacion.objects.count()
-    return f"COT-{count + 1:04d}"
+    """Consecutivo por año, como el formato FR-GC-08 de la empresa: 160-2026.
+
+    COTIZACION_CONSECUTIVO_INICIAL es el último número emitido fuera del
+    sistema, para seguir la numeración real sin saltos (si la última cotización
+    hecha a mano fue la 159, se pone 159 y la primera del sistema sale 160).
+    Las cotizaciones viejas con formato COT-0001 no entran en la cuenta.
+    """
+    anio = timezone.localdate().year
+    del_anio = Cotizacion.objects.filter(numero__endswith=f"-{anio}").count()
+    return f"{settings.COTIZACION_CONSECUTIVO_INICIAL + del_anio + 1}-{anio}"
 
 
-def _pdf_items(cotizacion):
-    return [
-        {
-            "material_nombre": i.material.nombre,
-            "cantidad": i.cantidad,
-            "unidad_medida": i.material.unidad_medida,
-            "precio_unitario": i.precio_unitario,
-        }
-        for i in cotizacion.items.select_related("material")
-    ]
+def _datos_pdf(cotizacion):
+    """Arma los datos del formato FR-GC-08 a partir de la cotización."""
+    cliente = cotizacion.solicitud.cliente
+
+    # Una sección de la tabla por planta, en el orden en que aparecen.
+    grupos, por_planta = [], {}
+    for i in cotizacion.items.select_related("material", "planta"):
+        planta = i.planta_efectiva
+        nombre = planta.nombre if planta else "-"
+        if nombre not in por_planta:
+            por_planta[nombre] = {"planta": nombre, "items": []}
+            grupos.append(por_planta[nombre])
+        por_planta[nombre]["items"].append({
+            "descripcion": i.material.nombre, "unidad": i.material.unidad_medida,
+            "cantidad": i.cantidad, "precio": i.precio_unitario, "subtotal": i.subtotal,
+        })
+
+    # Firma el comercial que armó la cotización, como en el formato en papel.
+    firmante = cotizacion.creado_por
+    return {
+        "numero": cotizacion.numero,
+        "fecha": timezone.localtime(cotizacion.created_at).date(),
+        "cliente": {
+            "nombre": cliente.nombre, "nit": cliente.nit,
+            "telefono": cliente.telefono, "email": cliente.email,
+        },
+        "grupos": grupos,
+        "subtotal": cotizacion.subtotal,
+        "iva": cotizacion.iva,
+        "iva_porcentaje": cotizacion.iva_porcentaje,
+        "total": cotizacion.total,
+        "plantas": [(p.nombre, p.ubicacion) for p in cotizacion.plantas],
+        "firmante": {
+            "nombre": (firmante.nombre or firmante.username) if firmante else "",
+            "cargo": firmante.cargo if firmante else None,
+            "telefono": firmante.telefono if firmante else None,
+            "email": firmante.email if firmante else None,
+            "firma_path": firmante.firma_path if firmante else None,
+        },
+        "notas": cotizacion.notas,
+    }
 
 
-def _generar_pdf(cotizacion, firma_path=None):
+def _generar_pdf(cotizacion):
     pdf_dir = settings.GENERATED_PDF_DIR
     pdf_path = pdf_dir / f"COT_{cotizacion.id}_{cotizacion.numero.replace('-', '_')}.pdf"
     try:
-        generate_cotizacion(
-            pdf_path, cotizacion.numero, cotizacion.created_at.date(),
-            cotizacion.solicitud.cliente.nombre,
-            ", ".join(p.nombre for p in cotizacion.plantas) or "-",
-            _pdf_items(cotizacion), cotizacion.total,
-            firma_path=firma_path, notas=cotizacion.notas,
-            subtotal=cotizacion.subtotal, iva=cotizacion.iva,
-            iva_porcentaje=cotizacion.iva_porcentaje,
-            tipo_precio_display=cotizacion.get_tipo_precio_display(),
-        )
+        generate_cotizacion(pdf_path, _datos_pdf(cotizacion))
         cotizacion.pdf_path = str(pdf_path)
         cotizacion.save(update_fields=["pdf_path"])
     except Exception as e:
@@ -159,7 +189,6 @@ class CotizacionAprobarView(APIView):
             cotizacion.aprobado_por = request.user
             cotizacion.fecha_aprobacion = timezone.now()
             cotizacion.save(update_fields=["estado", "aprobado_por", "fecha_aprobacion"])
-            _generar_pdf(cotizacion, firma_path=request.user.firma_path)
             Seguimiento.objects.create(
                 solicitud=cotizacion.solicitud, tipo="cotizacion_aprobada", usuario=request.user,
                 texto=f"{cotizacion.numero} aprobada.",
@@ -189,9 +218,16 @@ class CotizacionAprobarView(APIView):
 class CotizacionPdfView(APIView):
     def get(self, request, cotizacion_id):
         cotizacion = Cotizacion.objects.filter(id=cotizacion_id).first()
-        if not cotizacion or not cotizacion.pdf_path:
+        if not cotizacion:
+            return Response({"detail": "No encontrada"}, status=404)
+        # Se regenera al abrirlo: así las cotizaciones emitidas antes del
+        # formato FR-GC-08 también salen con él. Los valores no cambian porque
+        # los precios de cada línea son una foto tomada al crearla.
+        _generar_pdf(cotizacion)
+        cotizacion.refresh_from_db()
+        if not cotizacion.pdf_path:
             return Response({"detail": "PDF no disponible"}, status=404)
         path = Path(cotizacion.pdf_path)
         if not path.exists():
             return Response({"detail": "Archivo no encontrado"}, status=404)
-        return FileResponse(path.open("rb"), content_type="application/pdf", as_attachment=True, filename=f"{cotizacion.numero}.pdf")
+        return FileResponse(path.open("rb"), content_type="application/pdf", as_attachment=True, filename=f"COT {cotizacion.numero}.pdf")

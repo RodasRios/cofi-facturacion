@@ -5,6 +5,7 @@ import { getClientes, createCliente, marcarVinculado } from "../api/clientes";
 import { Icon } from "../components/ui/Icon";
 import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 import { LinksVinculacion } from "../components/LinksVinculacion";
+import { ControlDespachosFiltro } from "../components/ControlDespachosFiltro";
 import { crearSolicitudToken, urlPedidos } from "../api/solicitudTokens";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -17,6 +18,7 @@ export function ClientesPage() {
   // Los links de vinculación los genera el comercial (o un admin).
   const puedeGenerarLinks = !!user && (user.is_admin || user.rol === "comercial");
   const [showLinks, setShowLinks] = useState(false);
+  const [controlAbierto, setControlAbierto] = useState<number | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [nombre, setNombre] = useState("");
@@ -136,7 +138,7 @@ export function ClientesPage() {
           </thead>
           <tbody>
             {isLoading && <tr><td colSpan={8} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
-            {clientes?.map(c => (
+            {clientes?.map(c => [
               <tr key={c.id}>
                 <td>{c.numero_vinculacion || "-"}</td>
                 <td>{c.nombre}</td>
@@ -161,6 +163,10 @@ export function ClientesPage() {
                         <Icon name="picture_as_pdf" size={16} />
                       </button>
                     )}
+                    <button className="btn-ghost" title="Control de despacho de materiales"
+                      onClick={() => setControlAbierto(controlAbierto === c.id ? null : c.id)}>
+                      <Icon name="receipt_long" size={16} />
+                    </button>
                     {puedeGenerarLinks && (
                       <button className="btn-ghost" title="Copiar link para que el cliente pida cotizaciones"
                         onClick={() => linkPedidosMut.mutate(c.id)} disabled={linkPedidosMut.isPending}>
@@ -174,8 +180,15 @@ export function ClientesPage() {
                     )}
                   </div>
                 </td>
-              </tr>
-            ))}
+              </tr>,
+              controlAbierto === c.id && (
+                <tr key={`${c.id}-control`}>
+                  <td colSpan={8} style={{ background: "var(--bg-surface-2)", padding: 0 }}>
+                    <ControlDespachosFiltro cliente={c} onVer={(url, filename) => setPdfViewer({ url, filename })} />
+                  </td>
+                </tr>
+              ),
+            ])}
             {!isLoading && clientes?.length === 0 && (
               <tr><td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>Sin clientes todavía</td></tr>
             )}
