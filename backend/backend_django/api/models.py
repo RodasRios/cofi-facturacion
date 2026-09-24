@@ -22,14 +22,37 @@ class User(models.Model):
     rol = models.CharField(max_length=20, choices=ROL_CHOICES, default="comercial")
     is_active = models.BooleanField(default=True)
     is_admin = models.BooleanField(default=False)
+    # Dueño del sistema: único que crea o modifica administradores. Siempre es
+    # admin también (ver save()), así todo lo que abre is_admin le aplica.
+    is_superadmin = models.BooleanField(default=False)
+    # La contraseña la puso otra persona (alta o restablecimiento): al entrar se
+    # le pide cambiarla antes de dejarlo usar la app.
+    debe_cambiar_password = models.BooleanField(default=False)
     firma_path = models.CharField(max_length=500, blank=True, null=True)
     # Aparecen bajo la firma en cotización, orden y control de despachos.
     cargo = models.CharField(max_length=120, blank=True, null=True)
     telefono = models.CharField(max_length=40, blank=True, null=True)
+    cedula = models.CharField(max_length=30, blank=True, null=True)
+    last_login = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "users"
+
+    def save(self, *args, **kwargs):
+        if self.is_superadmin:
+            self.is_admin = True
+        super().save(*args, **kwargs)
+
+    def tiene_documentos(self):
+        """True si firmó, aprobó o creó algo: borrarlo dejaría esos documentos sin autor."""
+        relaciones = [
+            "clientes_creados", "tokens_cliente_creados", "solicitudes_creadas",
+            "cotizaciones_aprobadas", "cotizaciones_creadas", "pagos_aprobados",
+            "pagos_creados", "tokens_solicitud_creados", "seguimientos",
+            "ordenes_creadas", "despachos_creados",
+        ]
+        return any(getattr(self, r).exists() for r in relaciones)
 
     def __str__(self):
         return self.username

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Icon } from "../components/ui/Icon";
 import { getTablero, getSeguimientos, crearNota } from "../api/tablero";
+import { ResumenTablero } from "../components/ResumenTablero";
 import type { EtapaFlujo, FilaTablero, Rol, SeguimientoTipo } from "../types";
 
 // Las etapas en el orden del flujo, con el color que las identifica.
@@ -126,7 +127,13 @@ export function TableroPage() {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Tablero de seguimiento</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 12px" }}>Tablero</h1>
+      </div>
+
+      <ResumenTablero />
+
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Seguimiento de solicitudes</h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "3px 0 0" }}>
           En qué etapa del flujo va cada solicitud y quién tiene la pelota.
           {atascadas > 0 && <> <strong>{atascadas}</strong> llevan 3 días o más sin moverse.</>}

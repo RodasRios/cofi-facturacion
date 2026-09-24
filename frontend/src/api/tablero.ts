@@ -1,5 +1,5 @@
 import client from "./client";
-import type { FilaTablero, Seguimiento } from "../types";
+import type { FilaTablero, ResumenTablero, Seguimiento } from "../types";
 
 export async function getTablero(): Promise<FilaTablero[]> {
   const res = await client.get("/tablero/");
@@ -13,5 +13,10 @@ export async function getSeguimientos(solicitudId: number): Promise<Seguimiento[
 
 export async function crearNota(solicitudId: number, texto: string): Promise<Seguimiento> {
   const res = await client.post(`/solicitudes-cotizacion/${solicitudId}/seguimientos/`, { texto });
+  return res.data;
+}
+
+export async function getResumenTablero(): Promise<ResumenTablero> {
+  const res = await client.get("/tablero/resumen/");
   return res.data;
 }

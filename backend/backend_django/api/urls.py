@@ -1,5 +1,5 @@
 from django.urls import path
-from api.views.auth_views import LoginView, MeView, UserFirmaView
+from api.views.auth_views import LoginView, MeView, UserFirmaView, PerfilView, CambiarPasswordView
 from api.views.user_views import UserListCreateView, UserDetailView
 from api.views.planta_views import PlantaListCreateView, PlantaDetailView
 from api.views.material_views import MaterialListCreateView, MaterialDetailView, MaterialPrecioView
@@ -17,7 +17,7 @@ from api.views.orden_suministro_views import (
     OrdenSuministroListView, OrdenSuministroDetailView, OrdenSuministroNotificarView, OrdenSuministroPdfView,
 )
 from api.views.despacho_views import DespachoListCreateView, DespachoDetailView, DespachoPdfView
-from api.views.tablero_views import TableroView, SeguimientoListCreateView
+from api.views.tablero_views import TableroView, TableroResumenView, SeguimientoListCreateView
 from api.views.control_despachos_views import ControlDespachosPdfView
 from api.views.solicitud_token_views import (
     SolicitudTokenListCreateView, SolicitudTokenRevocarView, SolicitudPublicaView,
@@ -38,6 +38,8 @@ urlpatterns = []
 urlpatterns += p("auth/login", LoginView.as_view())
 urlpatterns += p("auth/me", MeView.as_view())
 urlpatterns += p("auth/firma", UserFirmaView.as_view())
+urlpatterns += p("auth/perfil", PerfilView.as_view())
+urlpatterns += p("auth/cambiar-password", CambiarPasswordView.as_view())
 
 # Usuarios (admin)
 urlpatterns += p("users/", UserListCreateView.as_view())
@@ -71,6 +73,7 @@ urlpatterns += p("clientes/", ClienteListCreateView.as_view())
 
 # Tablero de seguimiento del flujo
 urlpatterns += p("tablero/", TableroView.as_view())
+urlpatterns += p("tablero/resumen/", TableroResumenView.as_view())
 
 # Solicitudes de cotización
 urlpatterns += p("solicitudes-cotizacion/<int:solicitud_id>/seguimientos/", SeguimientoListCreateView.as_view())

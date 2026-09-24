@@ -185,9 +185,38 @@ de la más atrasada: sigue "por notificar" mientras quede una planta sin avisar.
 un paso al flujo, se agrega ahí y en el diccionario `ETAPAS` (que también dice
 qué rol tiene la pelota en cada etapa).
 
-### Roles
+### Roles, administradores y superusuario
 
-`User.rol` (plain `CharField`, not `AbstractUser`) is one of `comercial | aprobador | financiera | planta`, gating the corresponding step above via the permission classes in `api/permissions.py` (`IsComercial`, `IsAprobador`, `IsFinanciera`, `IsPlanta`). `User.is_admin` is a blanket override — `_has_rol()` in `permissions.py` lets an admin through regardless of `rol`. There is no `is_superadmin` and no TOTP/2FA in this project (both exist in `cofi-gestor-insumos` but were deliberately left out here to keep scope small).
+`User.rol` (plain `CharField`, not `AbstractUser`) is one of `comercial | aprobador | financiera | planta`, gating the corresponding step above via the permission classes in `api/permissions.py` (`IsComercial`, `IsAprobador`, `IsFinanciera`, `IsPlanta`). `User.is_admin` is a blanket override — `_has_rol()` in `permissions.py` lets an admin through regardless of `rol`. No TOTP/2FA and no multi-tenant layer (both exist in `cofi-gestor-insumos` but were deliberately left out).
+
+**Superusuario (`User.is_superadmin`)** — la cuenta del dueño. `User.save()` lo
+fuerza a ser también `is_admin`. Reglas en `api/views/user_views.py`:
+- Un admin crea y edita usuarios normales; **solo el superusuario** crea, edita,
+  da o quita permisos de admin/superusuario y toca cuentas de administradores.
+- Nadie se quita su propio acceso, y siempre queda al menos un superusuario activo.
+- **Eliminar** solo borra si el usuario no tiene documentos (`User.tiene_documentos()`);
+  si los tiene, responde 409 y se desactiva en su lugar — así las cotizaciones
+  conservan a su firmante.
+- La migración 0011 convirtió en superusuario al usuario `admin` existente.
+  Si se pierde el acceso: `python manage.py superusuario <usuario> --password`.
+
+**Contraseñas temporales**: al crear un usuario o restablecer su contraseña desde
+Configuración → Usuarios, la clave la genera el navegador, se muestra una sola vez
+para copiarla, y queda `debe_cambiar_password=True`. `ProtectedRoute` manda a esa
+persona a `/primer-ingreso` hasta que la cambie (`POST auth/cambiar-password`, que
+en ese caso no pide la actual). El login no distingue mayúsculas en el usuario.
+
+**Configuración** (`pages/ConfiguracionPage.tsx`, `/configuracion`, ícono de engranaje
+con el nombre en la cabecera; idea traída de `cofi-gestor-insumos`):
+Mi cuenta (nombre, cédula, cargo, teléfono, correo + contraseña, `PATCH auth/perfil`),
+Mi firma (con recorte, `components/ui/ImageCropper.tsx`, y vista previa de cómo sale
+en la cotización) y Usuarios (admin/superusuario). La cédula sale bajo el nombre del
+firmante en la cotización FR-GC-08. `/admin` quedó solo para plantas y precios.
+
+**Resumen del tablero** (`GET tablero/resumen/`, `components/ResumenTablero.tsx`):
+ventas del mes (= pagos aprobados), cotizado, % de aprobación, pendientes, despachado,
+6 meses de ventas vs. cotizado y tops por planta/cliente/material. Se calcula al
+vuelo, igual que las etapas; no hay tablas de agregados.
 
 ## Commands
 
@@ -199,7 +228,7 @@ pip install -r requirements.txt
 
 cp .env.example .env           # DEBUG defaults to True here; set SECRET_KEY for anything beyond local use
 python manage.py migrate
-python seed.py                 # creates 'admin' (password 'admin123'), 4 plantas, 6 materiales with example prices
+python seed.py                 # creates superusuario 'admin' (password 'admin123' or $ADMIN_PASSWORD) + the real catalog
 
 python manage.py runserver 8000
 ```

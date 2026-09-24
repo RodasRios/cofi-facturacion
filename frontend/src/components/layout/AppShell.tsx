@@ -56,20 +56,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className="nav-item"
                 style={isActive("/admin") ? { color: "#fff", fontWeight: 600, borderLeft: "2px solid rgba(255,255,255,0.8)" } : {}}
               >
-                <Icon name="settings" size={16} />
-                <span>Administración</span>
+                <Icon name="factory" size={16} />
+                <span>Plantas y precios</span>
               </Link>
             )}
           </nav>
         </div>
 
         <div className="header-right">
-          {user?.is_admin ? (
+          {user?.is_superadmin ? (
+            <span className="admin-badge"><Icon name="shield_person" size={12} />superusuario</span>
+          ) : user?.is_admin ? (
             <span className="admin-badge"><Icon name="admin_panel_settings" size={12} />admin</span>
           ) : (
             <span className="rol-badge">{user?.rol}</span>
           )}
-          <span className="header-username">{user?.username}</span>
+          <Link to="/configuracion" className="header-icon-btn header-user" title="Configuración: mis datos, firma y usuarios"
+            style={isActive("/configuracion") ? { background: "rgba(255,255,255,0.12)" } : undefined}>
+            <Icon name="settings" size={16} />
+            <span className="header-username">{user?.nombre?.split(" ")[0] || user?.username}</span>
+          </Link>
 
           <button onClick={toggleTheme} className="header-icon-btn" title={isDark ? "Tema claro" : "Tema oscuro"}>
             <Icon name={isDark ? "light_mode" : "dark_mode"} size={17} />
@@ -191,6 +197,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         .header-icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
         .header-btn-label { font-size: 12px; }
+        .header-user { text-decoration: none; gap: 6px; }
 
         .app-main { flex: 1; position: relative; z-index: 1; padding: 20px 16px; }
         .main-inner { max-width: 1200px; margin: 0 auto; }

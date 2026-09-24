@@ -9,9 +9,15 @@ export interface User {
   /** Salen bajo la firma en cotización, orden y control de despachos. */
   cargo: string | null;
   telefono: string | null;
+  cedula: string | null;
   is_admin: boolean;
+  /** Dueño del sistema: el único que crea o modifica administradores. */
+  is_superadmin: boolean;
   is_active: boolean;
+  /** La contraseña la puso otra persona: se pide cambiarla al entrar. */
+  debe_cambiar_password: boolean;
   firma_path: string | null;
+  last_login: string | null;
   created_at: string;
 }
 
@@ -302,4 +308,21 @@ export interface Despacho {
   items: DespachoItem[];
   creado_por: number | null;
   created_at: string;
+}
+
+export interface ResumenTablero {
+  kpis: {
+    ventas_mes: string;
+    cotizado_mes: string;
+    tasa_aprobacion: number | null;
+    pendientes_aprobacion: number;
+    pagos_por_revisar: number;
+    solicitudes_en_curso: number;
+    despachado_mes: string;
+  };
+  por_mes: { mes: string; ventas: string; cotizado: string }[];
+  cotizaciones_por_estado: Partial<Record<CotizacionEstado, number>>;
+  por_planta: { nombre: string; valor: string }[];
+  top_clientes: { nombre: string; valor: string }[];
+  top_materiales: { nombre: string; cantidad: string; unidad: string }[];
 }

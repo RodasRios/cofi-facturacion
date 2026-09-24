@@ -1,11 +1,10 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getPlantas, createPlanta, setPlantaActiva } from "../api/plantas";
 import { getMateriales, createMaterial } from "../api/materiales";
 import { Icon } from "../components/ui/Icon";
-import { UsuariosAdmin } from "../components/UsuariosAdmin";
-import { MiFirma } from "../components/MiFirma";
 import { PreciosPorPlanta } from "../components/PreciosPorPlanta";
 import type { MaterialTipo } from "../types";
 
@@ -47,10 +46,12 @@ export function AdminPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Administración</h1>
-
-      <MiFirma compacto />
-      <UsuariosAdmin />
+      <div>
+        <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Plantas y precios</h1>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "3px 0 0" }}>
+          Los usuarios, tus datos y tu firma están en <Link to="/configuracion">Configuración</Link>.
+        </p>
+      </div>
 
       <section className="card" style={{ padding: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 12px" }}>Plantas</h2>

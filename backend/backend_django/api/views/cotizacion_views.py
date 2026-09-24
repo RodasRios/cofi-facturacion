@@ -79,6 +79,7 @@ def _datos_pdf(cotizacion):
         "plantas": [(p.nombre, p.ubicacion) for p in cotizacion.plantas],
         "firmante": {
             "nombre": (firmante.nombre or firmante.username) if firmante else "",
+            "cedula": firmante.cedula if firmante else None,
             "cargo": firmante.cargo if firmante else None,
             "telefono": firmante.telefono if firmante else None,
             "email": firmante.email if firmante else None,

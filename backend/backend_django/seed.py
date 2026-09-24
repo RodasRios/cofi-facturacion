@@ -18,7 +18,7 @@ from api.models import User  # noqa: E402
 
 def run():
     if not User.objects.filter(username="admin").exists():
-        admin = User(username="admin", email="admin@cofi-facturacion.local", nombre="Administrador", rol="comercial", is_admin=True)
+        admin = User(username="admin", email="admin@cofi-facturacion.local", nombre="Administrador", rol="comercial", is_admin=True, is_superadmin=True)
         password = os.environ.get("ADMIN_PASSWORD", "admin123")
         admin.set_password(password)
         admin.save()

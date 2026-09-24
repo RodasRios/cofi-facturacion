@@ -429,6 +429,8 @@ def _bloque_firma(firmante: dict) -> list:
     else:
         elementos.append(Spacer(1, 1.6 * cm))
     elementos.append(_p(f"<b>{_escapar((firmante.get('nombre') or '').upper())}</b>", size=11, align=TA_LEFT))
+    if firmante.get("cedula"):
+        elementos.append(_p(f"C.C. {_escapar(firmante['cedula'])}", size=11, align=TA_LEFT))
     if firmante.get("cargo"):
         elementos.append(_p(_escapar(firmante["cargo"]), size=11, align=TA_LEFT))
     if firmante.get("telefono"):
@@ -566,7 +568,7 @@ def generate_cotizacion(path: Path, datos: dict) -> None:
     datos: numero, fecha, cliente {nombre, nit, telefono, email}, grupos
     [{planta, items [{descripcion, unidad, cantidad, precio, subtotal}]}],
     subtotal, iva, iva_porcentaje, total, plantas [(nombre, ubicacion)],
-    firmante {nombre, cargo, telefono, email, firma_path}, notas.
+    firmante {nombre, cedula, cargo, telefono, email, firma_path}, notas.
     """
     fecha: date = datos["fecha"]
     doc = _doc_formato(path, f"Cotización {datos['numero']}")

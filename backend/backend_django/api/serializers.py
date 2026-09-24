@@ -16,25 +16,46 @@ class UserOutSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "id", "username", "email", "nombre", "rol", "cargo", "telefono",
-            "is_admin", "is_active", "firma_path", "created_at",
+            "id", "username", "email", "nombre", "cedula", "rol", "cargo", "telefono",
+            "is_admin", "is_superadmin", "is_active", "debe_cambiar_password",
+            "firma_path", "last_login", "created_at",
         ]
 
 
 class UserWriteSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False)
+    """Alta y edición de usuarios desde Configuración → Usuarios.
+
+    Quién puede tocar qué (admin vs. superusuario) lo decide la vista; aquí
+    solo se validan los datos.
+    """
+    password = serializers.CharField(write_only=True, required=False, min_length=8)
 
     class Meta:
         model = User
         fields = [
-            "id", "username", "email", "nombre", "rol", "cargo", "telefono",
-            "is_admin", "is_active", "password",
+            "id", "username", "email", "nombre", "cedula", "rol", "cargo", "telefono",
+            "is_admin", "is_superadmin", "is_active", "password",
         ]
+
+    def validate_username(self, v):
+        v = v.strip().lower()
+        if not v:
+            raise serializers.ValidationError("El usuario no puede estar vacío.")
+        if " " in v:
+            raise serializers.ValidationError("El usuario no puede tener espacios.")
+        return v
+
+    def validate_email(self, v):
+        return (v or "").strip().lower() or None
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
+        if not password:
+            raise serializers.ValidationError({"password": "Asigna una contraseña inicial."})
         user = User(**validated_data)
-        user.set_password(password or User.objects.make_random_password())
+        user.set_password(password)
+        # La puso otra persona: que la cambie al entrar.
+        user.debe_cambiar_password = True
         user.save()
         return user
 
@@ -44,8 +65,20 @@ class UserWriteSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         if password:
             instance.set_password(password)
+            instance.debe_cambiar_password = True
         instance.save()
         return instance
+
+
+class PerfilSerializer(serializers.ModelSerializer):
+    """Lo que cada usuario edita de sí mismo en Configuración → Mi cuenta."""
+
+    class Meta:
+        model = User
+        fields = ["nombre", "email", "cedula", "cargo", "telefono"]
+
+    def validate_email(self, v):
+        return (v or "").strip().lower() or None
 
 
 class PlantaSerializer(serializers.ModelSerializer):

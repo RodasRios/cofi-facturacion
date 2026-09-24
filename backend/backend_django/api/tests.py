@@ -781,3 +781,96 @@ class CotizacionControlTest(TestCase):
         r = self.api.delete(f"/api/v1/materiales/{self.material.id}/precios/?planta={self.con_precio.id}")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertFalse(MaterialPlanta.objects.filter(planta=self.con_precio).exists())
+
+
+class GestionUsuariosTest(TestCase):
+    """Superusuario, admin y usuarios normales: quién puede crear y tocar a quién."""
+
+    def _user(self, username, **kw):
+        u = User(username=username, rol=kw.pop("rol", "comercial"), **kw)
+        u.set_password("clave-segura")
+        u.save()
+        return u
+
+    def setUp(self):
+        self.super = self._user("dueno", is_superadmin=True)
+        self.admin = self._user("jefe", is_admin=True)
+        self.comercial = self._user("vendedor")
+        self.api = APIClient()
+
+    def _login(self, username, password="clave-segura"):
+        self.api.credentials()
+        r = self.api.post("/api/v1/auth/login", {"username": username, "password": password}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def test_superusuario_siempre_es_admin(self):
+        self.assertTrue(self.super.is_admin)
+
+    def test_alta_con_clave_temporal_y_primer_ingreso(self):
+        self._login("jefe")
+        r = self.api.post("/api/v1/users/", {
+            "username": "Paola", "password": "temporal123", "rol": "comercial",
+            "nombre": "Paola Posso", "cedula": "1.112.000",
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["username"], "paola")
+        self.assertTrue(r.json()["debe_cambiar_password"])
+
+        self._login("PAOLA", "temporal123")  # sin distinguir mayúsculas
+        r = self.api.post("/api/v1/auth/cambiar-password", {"nueva": "corta"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.api.post("/api/v1/auth/cambiar-password", {"nueva": "definitiva123"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertFalse(r.json()["debe_cambiar_password"])
+        # Ya no es primer ingreso: ahora sí pide la actual.
+        r = self.api.post("/api/v1/auth/cambiar-password", {"nueva": "otra-clave-1"}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_admin_no_crea_ni_toca_administradores(self):
+        self._login("jefe")
+        r = self.api.post("/api/v1/users/", {"username": "otro", "password": "temporal123", "is_admin": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"is_admin": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.api.patch(f"/api/v1/users/{self.super.id}/", {"nombre": "X"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"rol": "planta"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_superusuario_gestiona_admins(self):
+        self._login("dueno")
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"is_admin": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        r = self.api.patch(f"/api/v1/users/{self.admin.id}/", {"is_superadmin": True}, format="json")
+        self.assertTrue(r.json()["is_admin"] and r.json()["is_superadmin"])
+
+    def test_no_se_queda_sin_superusuario(self):
+        self._login("dueno")
+        r = self.api.patch(f"/api/v1/users/{self.super.id}/", {"is_superadmin": False}, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.api.delete(f"/api/v1/users/{self.super.id}/")
+        self.assertEqual(r.status_code, 400)
+
+    def test_eliminar_solo_sin_documentos(self):
+        self._login("dueno")
+        Cliente.objects.create(nombre="ACME", creado_por=self.comercial)
+        r = self.api.delete(f"/api/v1/users/{self.comercial.id}/")
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(User.objects.filter(id=self.comercial.id).exists())
+
+        r = self.api.delete(f"/api/v1/users/{self.admin.id}/")
+        self.assertEqual(r.status_code, 204)
+
+    def test_perfil_propio(self):
+        self._login("vendedor")
+        r = self.api.patch("/api/v1/auth/perfil", {"cedula": "123", "cargo": "Comercial", "is_admin": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["cedula"], "123")
+        self.assertFalse(r.json()["is_admin"])
+
+    def test_resumen_tablero(self):
+        self._login("vendedor")
+        r = self.api.get("/api/v1/tablero/resumen/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(r.json()["por_mes"]), 6)

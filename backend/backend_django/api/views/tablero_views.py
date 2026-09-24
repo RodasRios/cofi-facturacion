@@ -8,7 +8,10 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from api.models import SolicitudCotizacion, Seguimiento
+from collections import defaultdict
+from decimal import Decimal
+
+from api.models import SolicitudCotizacion, Seguimiento, Cotizacion, Pago, DespachoItem
 from api.serializers import SeguimientoSerializer
 
 # Cada etapa dice quién tiene la pelota. El orden es el del flujo.
@@ -140,3 +143,105 @@ class SeguimientoListCreateView(APIView):
             solicitud=solicitud, tipo="nota", texto=texto, usuario=request.user,
         )
         return Response(SeguimientoSerializer(seg).data, status=201)
+
+
+def _mes(fecha):
+    return f"{fecha.year:04d}-{fecha.month:02d}"
+
+
+def _ultimos_meses(hoy, n):
+    """['2026-04', …, '2026-09'] — los n meses que terminan en el actual."""
+    meses, y, m = [], hoy.year, hoy.month
+    for _ in range(n):
+        meses.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    return list(reversed(meses))
+
+
+class TableroResumenView(APIView):
+    """Indicadores del negocio para la parte de arriba del tablero.
+
+    Todo se calcula al vuelo desde los documentos: ventas = pagos aprobados
+    (es la plata que entró), cotizado = cotizaciones no rechazadas.
+    """
+
+    MESES = 6
+
+    def get(self, request):
+        hoy = timezone.localdate()
+        meses = _ultimos_meses(hoy, self.MESES)
+        mes_actual = meses[-1]
+
+        cotizaciones = list(
+            Cotizacion.objects
+            .select_related("solicitud__cliente", "planta")
+            .prefetch_related("items__planta", "items__material", "ajustes")
+        )
+        pagos = list(Pago.objects.filter(estado="aprobado").select_related("cotizacion__solicitud__cliente"))
+
+        ventas_mes = defaultdict(Decimal)
+        for p in pagos:
+            ventas_mes[_mes(timezone.localtime(p.fecha_aprobacion or p.created_at))] += p.monto
+
+        cotizado_mes = defaultdict(Decimal)
+        por_estado = defaultdict(int)
+        por_planta = defaultdict(Decimal)
+        por_cliente = defaultdict(Decimal)
+        por_material = defaultdict(lambda: {"cantidad": Decimal("0"), "unidad": ""})
+        for c in cotizaciones:
+            por_estado[c.estado] += 1
+            if c.estado == "rechazada":
+                continue
+            cotizado_mes[_mes(timezone.localtime(c.created_at))] += c.total
+            if c.estado != "aprobada":
+                continue
+            por_cliente[c.solicitud.cliente.nombre] += c.total
+            for i in c.items.all():
+                planta = i.planta_efectiva
+                por_planta[planta.nombre if planta else "-"] += i.subtotal
+                mat = por_material[i.material.nombre]
+                mat["cantidad"] += i.cantidad
+                mat["unidad"] = i.material.unidad_medida
+
+        despachado_mes = sum(
+            (d.cantidad for d in DespachoItem.objects.filter(
+                despacho__fecha__year=hoy.year, despacho__fecha__month=hoy.month,
+            )),
+            Decimal("0"),
+        )
+
+        decididas = por_estado["aprobada"] + por_estado["rechazada"]
+        en_curso = sum(
+            1 for s in SolicitudCotizacion.objects.prefetch_related(
+                "cotizaciones__pagos", "cotizaciones__ordenes_suministro__despachos",
+            )
+            if s.estado != "cerrada" and _etapa_de(s)[0] != "despachada"
+        )
+
+        def top(d, n=5):
+            return [{"nombre": k, "valor": str(v)} for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:n]]
+
+        return Response({
+            "kpis": {
+                "ventas_mes": str(ventas_mes[mes_actual]),
+                "cotizado_mes": str(cotizado_mes[mes_actual]),
+                "tasa_aprobacion": round(100 * por_estado["aprobada"] / decididas) if decididas else None,
+                "pendientes_aprobacion": por_estado["pendiente_aprobacion"],
+                "pagos_por_revisar": Pago.objects.filter(estado="pendiente").count(),
+                "solicitudes_en_curso": en_curso,
+                "despachado_mes": str(despachado_mes),
+            },
+            "por_mes": [
+                {"mes": m, "ventas": str(ventas_mes[m]), "cotizado": str(cotizado_mes[m])}
+                for m in meses
+            ],
+            "cotizaciones_por_estado": dict(por_estado),
+            "por_planta": top(por_planta, 10),
+            "top_clientes": top(por_cliente),
+            "top_materiales": [
+                {"nombre": k, "cantidad": str(v["cantidad"]), "unidad": v["unidad"]}
+                for k, v in sorted(por_material.items(), key=lambda kv: -kv[1]["cantidad"])[:5]
+            ],
+        })

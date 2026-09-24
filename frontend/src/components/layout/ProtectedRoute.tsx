@@ -12,6 +12,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 
   if (!user) return <Navigate to="/login" replace />;
+  // Contraseña temporal puesta por un administrador: primero hay que cambiarla.
+  if (user.debe_cambiar_password) return <Navigate to="/primer-ingreso" replace />;
 
   return <>{children}</>;
 }

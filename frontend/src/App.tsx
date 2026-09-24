@@ -12,6 +12,8 @@ import { PagosPage } from "./pages/PagosPage";
 import { OrdenesSuministroPage } from "./pages/OrdenesSuministroPage";
 import { DespachosPage } from "./pages/DespachosPage";
 import { AdminPage } from "./pages/AdminPage";
+import { ConfiguracionPage } from "./pages/ConfiguracionPage";
+import { PrimerIngresoPage } from "./pages/PrimerIngresoPage";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return <ProtectedRoute><AppShell>{children}</AppShell></ProtectedRoute>;
@@ -21,6 +23,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/primer-ingreso" element={<PrimerIngresoPage />} />
 
       {/* Pública: el cliente entra por el link que le manda el comercial, sin usuario */}
       <Route path="/vincular/:token" element={<VinculacionPublicaPage />} />
@@ -35,6 +38,7 @@ export default function App() {
       <Route path="/ordenes-suministro" element={<Shell><OrdenesSuministroPage /></Shell>} />
       <Route path="/despachos" element={<Shell><DespachosPage /></Shell>} />
       <Route path="/admin" element={<Shell><AdminPage /></Shell>} />
+      <Route path="/configuracion" element={<Shell><ConfiguracionPage /></Shell>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
