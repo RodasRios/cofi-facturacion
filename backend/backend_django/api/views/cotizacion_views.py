@@ -13,10 +13,13 @@ from api.models import (
 )
 from services.notas_cotizacion import NOTAS_ACLARATORIAS, CLAVES as CLAVES_NOTAS
 from api.serializers import CotizacionSerializer
-from api.permissions import IsAprobador
+from api.permissions import Requiere
 from services.pdf_service import generate_cotizacion
 
 logger = logging.getLogger(__name__)
+
+# Quien paga, aprueba o emite órdenes necesita leer las cotizaciones.
+LEER_COTIZACIONES = ("cotizaciones", "aprobar_cotizaciones", "pagos", "aprobar_pagos", "ordenes")
 
 
 def _numero_cotizacion():
@@ -182,6 +185,7 @@ def _validar_ajustes(ajustes):
 
 
 class NotasAclaratoriasView(APIView):
+    permission_classes = [Requiere(("cotizaciones",))]
     """Catálogo de notas aclaratorias para las casillas de la cotización."""
 
     def get(self, request):
@@ -189,10 +193,12 @@ class NotasAclaratoriasView(APIView):
 
 
 class CotizacionListCreateView(APIView):
+    permission_classes = [Requiere(LEER_COTIZACIONES, ("cotizaciones",))]
     def get(self, request):
         cotizaciones = (
             Cotizacion.objects.select_related("solicitud__cliente", "planta", "creado_por")
-            .prefetch_related("items__material", "items__planta", "ajustes", "pagos", "ordenes_suministro")
+            .prefetch_related("items__material", "items__planta", "items__ordenes_items", "ajustes", "pagos",
+                              "ordenes_suministro__items__cotizacion_item")
         )
         estado = request.query_params.get("estado")
         if estado:
@@ -267,6 +273,7 @@ class CotizacionListCreateView(APIView):
 
 
 class CotizacionDetailView(APIView):
+    permission_classes = [Requiere(LEER_COTIZACIONES, ("cotizaciones",))]
     def get_object(self, cotizacion_id):
         return Cotizacion.objects.filter(id=cotizacion_id).first()
 
@@ -278,7 +285,7 @@ class CotizacionDetailView(APIView):
 
 
 class CotizacionAprobarView(APIView):
-    permission_classes = [IsAprobador]
+    permission_classes = [Requiere(("aprobar_cotizaciones",))]
 
     def post(self, request, cotizacion_id):
         cotizacion = Cotizacion.objects.filter(id=cotizacion_id).first()
@@ -320,6 +327,7 @@ class CotizacionAprobarView(APIView):
 
 
 class CotizacionPdfView(APIView):
+    permission_classes = [Requiere(LEER_COTIZACIONES)]
     def get(self, request, cotizacion_id):
         cotizacion = Cotizacion.objects.filter(id=cotizacion_id).first()
         if not cotizacion:

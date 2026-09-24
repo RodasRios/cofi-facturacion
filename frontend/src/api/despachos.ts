@@ -13,3 +13,11 @@ export async function createDespacho(data: {
   const res = await client.post("/despachos/", data);
   return res.data;
 }
+
+/** Foto o PDF del tiquete/remisión firmado. */
+export async function subirSoporteDespacho(id: number, file: File): Promise<Despacho> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await client.post(`/despachos/${id}/soporte/`, form);
+  return res.data;
+}

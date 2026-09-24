@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from api.permissions import Requiere
 
 from api.models import Cliente, DespachoItem, User
 from services.pdf_service import generate_control_despachos
@@ -105,6 +106,7 @@ def armar_control(cliente, desde=None, hasta=None, obra=None):
 
 
 class ControlDespachosPdfView(APIView):
+    permission_classes = [Requiere(("despachos", "ordenes", "clientes"))]
     """GET ?cliente=<id>&desde=AAAA-MM-DD&hasta=AAAA-MM-DD&obra=<texto>&reviso=<user_id>"""
 
     def get(self, request):

@@ -18,7 +18,7 @@ from rest_framework.throttling import AnonRateThrottle
 from api.models import (
     Cliente, Material, SolicitudCotizacion, SolicitudCotizacionItem, SolicitudToken,
 )
-from api.permissions import IsComercial
+from api.permissions import Requiere
 from api.serializers import SolicitudCotizacionSerializer, SolicitudTokenSerializer
 from api.views.solicitud_views import _numero_solicitud
 
@@ -28,7 +28,7 @@ class SolicitudPublicaThrottle(AnonRateThrottle):
 
 
 class SolicitudTokenListCreateView(APIView):
-    permission_classes = [IsComercial]
+    permission_classes = [Requiere(("clientes",))]
 
     def get(self, request):
         tokens = SolicitudToken.objects.select_related("cliente", "creado_por")
@@ -55,7 +55,7 @@ class SolicitudTokenListCreateView(APIView):
 
 
 class SolicitudTokenRevocarView(APIView):
-    permission_classes = [IsComercial]
+    permission_classes = [Requiere(("clientes",))]
 
     def delete(self, request, token_id):
         token = SolicitudToken.objects.filter(id=token_id).first()

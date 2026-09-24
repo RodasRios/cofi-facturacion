@@ -1,5 +1,9 @@
 export type Rol = "comercial" | "aprobador" | "financiera" | "planta";
 
+export type Permiso =
+  | "tablero" | "clientes" | "solicitudes" | "cotizaciones" | "aprobar_cotizaciones"
+  | "pagos" | "aprobar_pagos" | "ordenes" | "despachos" | "disponibilidad" | "precios";
+
 export interface User {
   id: number;
   username: string;
@@ -16,6 +20,10 @@ export interface User {
   is_active: boolean;
   /** La contraseña la puso otra persona: se pide cambiarla al entrar. */
   debe_cambiar_password: boolean;
+  /** Pestañas y acciones permitidas. Un admin las tiene todas. */
+  permisos: Permiso[];
+  /** Plantas asignadas (órdenes, despachos, disponibilidad). Vacío = todas. */
+  plantas: number[];
   firma_path: string | null;
   last_login: string | null;
   created_at: string;
@@ -26,8 +34,15 @@ export interface Planta {
   nombre: string;
   ubicacion: string | null;
   activa: boolean;
+  /** A dónde se avisa al emitirle una orden de suministro. */
+  whatsapp: string | null;
+  email: string | null;
+  nota_disponibilidad: string | null;
+  nota_actualizada_at: string | null;
   created_at: string;
 }
+
+export type Disponibilidad = "disponible" | "limitada" | "agotada";
 
 export type MaterialTipo = "triturado" | "agregado" | "otro";
 
@@ -61,6 +76,18 @@ export interface MaterialPlantaPrecio {
   /** Ambos sin IVA. `precio_detal` en null = esa planta no maneja esa tarifa. */
   precio_especial: string;
   precio_detal: string | null;
+  material_nombre: string;
+  unidad_medida: string;
+  disponibilidad: Disponibilidad;
+  cantidad_disponible: string | null;
+  disponibilidad_nota: string | null;
+  disponibilidad_actualizada_at: string | null;
+  disponibilidad_actualizada_por_nombre: string | null;
+}
+
+export interface PlantaDisponibilidad extends Planta {
+  editable: boolean;
+  materiales: MaterialPlantaPrecio[];
 }
 
 export interface Material {
@@ -113,6 +140,7 @@ export type EtapaFlujo =
   | "pendiente_aprobacion"
   | "pendiente_pago"
   | "pendiente_aprobacion_pago"
+  | "pendiente_orden"
   | "pendiente_notificacion"
   | "pendiente_despacho"
   | "despachada";
@@ -128,6 +156,9 @@ export interface FilaTablero {
   dias_en_etapa: number;
   cotizacion_numero: string | null;
   total: string | null;
+  pagado: string | null;
+  por_confirmar: string | null;
+  saldo_por_cobrar: string | null;
   cotizaciones_rechazadas: number;
   pagos_rechazados: number;
   created_at: string;
@@ -205,6 +236,10 @@ export interface CotizacionItem {
   precio_unitario: string;
   origen_precio: OrigenPrecio;
   subtotal: string;
+  /** Planta real de la línea (la de la cotización si la línea no tiene propia). */
+  planta_efectiva: number | null;
+  /** Lo que ya salió en órdenes de suministro. */
+  cantidad_ordenada: string;
 }
 
 export type CotizacionEstado = "pendiente_aprobacion" | "aprobada" | "rechazada";
@@ -238,26 +273,68 @@ export interface Cotizacion {
   creado_por: number | null;
   creado_por_username: string | null;
   tiene_orden_suministro: boolean;
-  tiene_pago: boolean;
   pagos_rechazados: number;
+  total_pagado: string;
+  total_en_revision: string;
+  total_por_confirmar: string;
+  saldo_por_cobrar: string;
+  /** Lo que falta cubrir con algún pago u orden de compra. */
+  saldo_sin_registrar: string;
+  /** Aprobada y con algo pagado u orden de compra: ya se puede emitir orden. */
+  habilita_ordenes: boolean;
+  porcentaje_ordenado: number;
   created_at: string;
+  /** Solo en /ordenes-suministro/por-ordenar/. */
+  obra?: string | null;
 }
 
-export type PagoEstado = "pendiente" | "aprobado" | "rechazado";
+export type PagoEstado = "pendiente" | "por_confirmar" | "aprobado" | "rechazado";
+export type PagoTipo = "transferencia" | "orden_compra";
 
 export interface Pago {
   id: number;
   cotizacion: number;
   cotizacion_numero: string;
+  cliente_nombre: string;
+  tipo: PagoTipo;
+  tipo_display: string;
   monto: string;
+  referencia: string | null;
+  fecha_pago: string | null;
+  notas: string | null;
   comprobante_path: string | null;
   estado: PagoEstado;
+  estado_display: string;
   aprobado_por: number | null;
   aprobado_por_username: string | null;
   fecha_aprobacion: string | null;
   motivo_rechazo: string | null;
   creado_por: number | null;
+  creado_por_username: string | null;
   created_at: string;
+}
+
+export interface FilaCartera {
+  cotizacion_id: number;
+  cotizacion_numero: string;
+  cliente_nombre: string;
+  total: string;
+  pagado: string;
+  en_revision: string;
+  por_confirmar: string;
+  saldo_por_cobrar: string;
+  sin_respaldo: string;
+  fecha_aprobacion: string | null;
+}
+
+export interface OrdenSuministroItem {
+  id: number;
+  cotizacion_item: number;
+  material: number;
+  material_nombre: string;
+  unidad_medida: string;
+  cantidad: string;
+  cantidad_despachada: string;
 }
 
 export interface OrdenSuministro {
@@ -268,18 +345,27 @@ export interface OrdenSuministro {
   cliente_nombre: string;
   planta: number;
   planta_nombre: string;
+  planta_whatsapp: string | null;
+  planta_email: string | null;
   obra: string | null;
   notificada_planta: boolean;
   fecha_notificacion: string | null;
-  /** Se completan después de emitida, cuando el cliente confirma el retiro. */
+  notificada_por_username: string | null;
+  canales_notificacion: ("whatsapp" | "email" | "manual")[];
   fecha_suministro: string | null;
   placas_empresa: string | null;
   placas_cliente: string | null;
   notas: string | null;
   pdf_path: string | null;
-  items: CotizacionItem[];
+  items: OrdenSuministroItem[];
+  completamente_despachada: boolean;
   creado_por: number | null;
+  creado_por_username: string | null;
   created_at: string;
+  /** Solo en detalle, creación y notificación. */
+  whatsapp_url?: string;
+  link_pdf_publico?: string;
+  email_configurado?: boolean;
 }
 
 export interface DespachoItem {
@@ -305,6 +391,8 @@ export interface Despacho {
   placa_vehiculo: string | null;
   notas: string | null;
   pdf_path: string | null;
+  /** Foto o PDF del tiquete firmado que sube la planta. */
+  soporte_path: string | null;
   items: DespachoItem[];
   creado_por: number | null;
   created_at: string;
@@ -319,6 +407,8 @@ export interface ResumenTablero {
     pagos_por_revisar: number;
     solicitudes_en_curso: number;
     despachado_mes: string;
+    por_cobrar: string;
+    por_confirmar: string;
   };
   por_mes: { mes: string; ventas: string; cotizado: string }[];
   cotizaciones_por_estado: Partial<Record<CotizacionEstado, number>>;

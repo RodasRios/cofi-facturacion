@@ -2,11 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getPlantas, createPlanta, setPlantaActiva } from "../api/plantas";
+import { getPlantas, createPlanta, setPlantaActiva, actualizarPlanta } from "../api/plantas";
 import { getMateriales, createMaterial } from "../api/materiales";
 import { Icon } from "../components/ui/Icon";
 import { PreciosPorPlanta } from "../components/PreciosPorPlanta";
-import type { MaterialTipo } from "../types";
+import type { MaterialTipo, Planta } from "../types";
 
 export function AdminPage() {
   const qc = useQueryClient();
@@ -23,6 +23,19 @@ export function AdminPage() {
     },
     onError: () => toast.error("No se pudo actualizar la planta"),
   });
+
+  const editarPlanta = useMutation({
+    mutationFn: ({ id, campo, valor }: { id: number; campo: "ubicacion" | "whatsapp" | "email"; valor: string }) =>
+      actualizarPlanta(id, { [campo]: valor || null }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["plantas"] }); toast.success("Planta actualizada"); },
+    onError: () => toast.error("No se pudo actualizar la planta (revisa el correo)"),
+  });
+  const celdaPlanta = (p: Planta, campo: "ubicacion" | "whatsapp" | "email", placeholder: string) => (
+    <input className="input-base" style={{ width: "100%" }} key={`${p.id}-${campo}-${p[campo]}`}
+      defaultValue={p[campo] ?? ""} placeholder={placeholder} type={campo === "email" ? "email" : "text"}
+      onBlur={e => { const v = e.target.value.trim(); if (v !== (p[campo] ?? "")) editarPlanta.mutate({ id: p.id, campo, valor: v }); }}
+      onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+  );
 
   const crearPlantaMut = useMutation({
     mutationFn: () => createPlanta({ nombre: nombrePlanta, ubicacion: ubicacionPlanta }),
@@ -54,7 +67,10 @@ export function AdminPage() {
       </div>
 
       <section className="card" style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 12px" }}>Plantas</h2>
+        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 4px" }}>Plantas</h2>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
+          El WhatsApp y el correo reciben el aviso de cada orden de suministro. Se guardan al salir de la casilla.
+        </p>
         <form
           style={{ display: "flex", gap: 8, marginBottom: 14 }}
           onSubmit={(e) => { e.preventDefault(); crearPlantaMut.mutate(); }}
@@ -64,12 +80,14 @@ export function AdminPage() {
           <button type="submit" className="btn-primary"><Icon name="add" size={16} />Agregar</button>
         </form>
         <table className="table-sharp">
-          <thead><tr><th>Nombre</th><th>Ubicación</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Ubicación</th><th>WhatsApp (avisos)</th><th>Correo (avisos)</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             {plantasVisibles.map(p => (
               <tr key={p.id} style={p.activa ? undefined : { opacity: 0.55 }}>
                 <td>{p.nombre}</td>
-                <td>{p.ubicacion || "-"}</td>
+                <td>{celdaPlanta(p, "ubicacion", "Dirección para la cotización")}</td>
+                <td>{celdaPlanta(p, "whatsapp", "312 000 0000")}</td>
+                <td>{celdaPlanta(p, "email", "planta@triturados.com")}</td>
                 <td>
                   {p.activa
                     ? <span className="badge" style={{ background: "var(--accent-light)", color: "var(--accent-text)" }}>Activa</span>

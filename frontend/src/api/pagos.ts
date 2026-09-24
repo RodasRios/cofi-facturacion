@@ -1,13 +1,22 @@
 import client from "./client";
-import type { Pago } from "../types";
+import type { FilaCartera, Pago, PagoTipo } from "../types";
 
-export async function getPagos(estado?: string): Promise<Pago[]> {
-  const res = await client.get("/pagos/", { params: estado ? { estado } : undefined });
+export async function getPagos(params?: { estado?: string; cotizacion?: number }): Promise<Pago[]> {
+  const res = await client.get("/pagos/", { params });
   return res.data;
 }
 
-export async function createPago(data: { cotizacion: number; monto?: number }): Promise<Pago> {
-  const res = await client.post("/pagos/", data);
+/** Abono, pago completo u orden de compra. El archivo (comprobante u OC) es opcional. */
+export async function createPago(data: {
+  cotizacion: number; tipo: PagoTipo; monto: number; referencia?: string;
+  fecha_pago?: string; notas?: string; file?: File | null;
+}): Promise<Pago> {
+  const form = new FormData();
+  Object.entries(data).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    form.append(k, v instanceof File ? v : String(v));
+  });
+  const res = await client.post("/pagos/", form);
   return res.data;
 }
 
@@ -18,7 +27,13 @@ export async function uploadComprobante(pagoId: number, file: File): Promise<Pag
   return res.data;
 }
 
-export async function aprobarPago(id: number, aprobar: boolean, motivo?: string): Promise<Pago> {
-  const res = await client.post(`/pagos/${id}/aprobar/`, { aprobar, motivo });
+/** Aprobar/rechazar un pago, o confirmar/anular una orden de compra (con el monto que llegó). */
+export async function aprobarPago(id: number, aprobar: boolean, extra?: { motivo?: string; monto?: number; referencia?: string }): Promise<Pago> {
+  const res = await client.post(`/pagos/${id}/aprobar/`, { aprobar, ...extra });
+  return res.data;
+}
+
+export async function getCartera(): Promise<FilaCartera[]> {
+  const res = await client.get("/pagos/cartera/");
   return res.data;
 }

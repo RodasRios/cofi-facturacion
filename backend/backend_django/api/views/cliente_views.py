@@ -4,6 +4,7 @@ from django.conf import settings
 from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from api.permissions import Requiere
 from api.models import Cliente
 from api.serializers import ClienteSerializer
 from services.pdf_service import generate_vinculacion
@@ -34,6 +35,7 @@ def _generar_pdf(cliente):
 
 
 class ClienteListCreateView(APIView):
+    permission_classes = [Requiere(("clientes", "solicitudes", "cotizaciones"), ("clientes",))]
     def get(self, request):
         clientes = Cliente.objects.all()
         q = request.query_params.get("q")
@@ -52,6 +54,7 @@ class ClienteListCreateView(APIView):
 
 
 class ClienteDetailView(APIView):
+    permission_classes = [Requiere(("clientes", "solicitudes", "cotizaciones"), ("clientes",))]
     def get_object(self, cliente_id):
         return Cliente.objects.filter(id=cliente_id).first()
 
@@ -73,6 +76,7 @@ class ClienteDetailView(APIView):
 
 
 class ClientePdfView(APIView):
+    permission_classes = [Requiere(("clientes",))]
     def get(self, request, cliente_id):
         cliente = Cliente.objects.filter(id=cliente_id).first()
         if not cliente or not cliente.pdf_path:

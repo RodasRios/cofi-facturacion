@@ -7,6 +7,7 @@ quedar desincronizado de la realidad.
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from api.permissions import Requiere
 
 from collections import defaultdict
 from decimal import Decimal
@@ -16,19 +17,31 @@ from api.serializers import SeguimientoSerializer
 
 # Cada etapa dice quién tiene la pelota. El orden es el del flujo.
 ETAPAS = {
-    "pendiente_cotizacion":      ("Pendiente de cotizar",        "comercial"),
-    "en_seguimiento":            ("En seguimiento del cliente",  "comercial"),
-    "pendiente_aprobacion":      ("Esperando aprobación",        "aprobador"),
-    "pendiente_pago":            ("Esperando pago del cliente",  "comercial"),
+    "pendiente_cotizacion":      ("Pendiente de cotizar",          "comercial"),
+    "en_seguimiento":            ("En seguimiento del cliente",    "comercial"),
+    "pendiente_aprobacion":      ("Esperando aprobación",          "aprobador"),
+    "pendiente_pago":            ("Esperando pago del cliente",    "comercial"),
     "pendiente_aprobacion_pago": ("Esperando visto de financiera", "financiera"),
-    "pendiente_notificacion":    ("Por notificar a planta",      "planta"),
-    "pendiente_despacho":        ("Por despachar",               "planta"),
-    "despachada":                ("Despachada",                  None),
+    "pendiente_orden":           ("Por emitir orden de suministro", "comercial"),
+    "pendiente_notificacion":    ("Por notificar a planta",        "comercial"),
+    "pendiente_despacho":        ("Por despachar",                 "planta"),
+    "despachada":                ("Despachada",                    None),
 }
+
+PREFETCH = (
+    "cotizaciones__items__planta", "cotizaciones__items__ordenes_items", "cotizaciones__ajustes",
+    "cotizaciones__pagos", "cotizaciones__ordenes_suministro__items__cotizacion_item",
+    "cotizaciones__ordenes_suministro__despachos__items",
+)
 
 
 def _etapa_de(solicitud):
-    """Devuelve (clave_etapa, fecha_en_que_entró_a_esa_etapa)."""
+    """Devuelve (clave_etapa, fecha_en_que_entró_a_esa_etapa).
+
+    Con pagos parciales y órdenes parciales, la solicitud va al ritmo de lo
+    más atrasado: mientras haya una orden sin notificar o sin despachar, o
+    material cotizado sin ordenar, no está "despachada".
+    """
     cot = solicitud.cotizacion_vigente
 
     if cot is None:
@@ -43,51 +56,46 @@ def _etapa_de(solicitud):
     if cot.estado == "pendiente_aprobacion":
         return "pendiente_aprobacion", cot.created_at
 
-    # De aquí en adelante la cotización está aprobada.
-    pago = cot.pago_vigente
-    if pago is None:
-        rechazados = [p for p in cot.pagos.all() if p.estado == "rechazado"]
+    # Cotización aprobada. Sin nada pagado ni orden de compra no se puede ordenar.
+    pagos = list(cot.pagos.all())
+    if not cot.habilita_ordenes:
+        en_revision = [p for p in pagos if p.estado == "pendiente"]
+        if en_revision:
+            return "pendiente_aprobacion_pago", min(p.created_at for p in en_revision)
+        rechazados = [p for p in pagos if p.estado == "rechazado"]
         desde = (
             max((p.fecha_aprobacion or p.created_at) for p in rechazados)
             if rechazados else (cot.fecha_aprobacion or cot.created_at)
         )
         return "pendiente_pago", desde
 
-    if pago.estado == "pendiente":
-        return "pendiente_aprobacion_pago", pago.created_at
-
-    # Pago aprobado: ya existen las órdenes de suministro (una por planta si la
-    # cotización se repartió). La solicitud avanza al ritmo de la más atrasada.
     ordenes = list(cot.ordenes_suministro.all())
-    if not ordenes:
-        return "pendiente_aprobacion_pago", pago.created_at
-
     sin_notificar = [o for o in ordenes if not o.notificada_planta]
     if sin_notificar:
         return "pendiente_notificacion", min(o.created_at for o in sin_notificar)
 
-    sin_despachar = [o for o in ordenes if not o.despachos.all()]
+    sin_despachar = [o for o in ordenes if not o.completamente_despachada]
     if sin_despachar:
-        return "pendiente_despacho", min(
-            (o.fecha_notificacion or o.created_at) for o in sin_despachar
-        )
+        return "pendiente_despacho", min((o.fecha_notificacion or o.created_at) for o in sin_despachar)
 
-    ultimo = max(d.created_at for o in ordenes for d in o.despachos.all())
+    por_ordenar = any(cot.cantidad_ordenada(i) < i.cantidad for i in cot.items.all())
+    if por_ordenar or not ordenes:
+        desde = max([o.created_at for o in ordenes] + [p.fecha_aprobacion or p.created_at for p in pagos])
+        return "pendiente_orden", desde
+
+    ultimo = max((d.created_at for o in ordenes for d in o.despachos.all()), default=cot.created_at)
     return "despachada", ultimo
 
 
 class TableroView(APIView):
+    permission_classes = [Requiere(("tablero",))]
     """Una fila por solicitud, con su etapa actual y cuánto lleva ahí."""
 
     def get(self, request):
         solicitudes = (
             SolicitudCotizacion.objects
             .select_related("cliente")
-            .prefetch_related(
-                "cotizaciones__items__planta",
-                "cotizaciones__pagos",
-                "cotizaciones__ordenes_suministro__despachos",
-            )
+            .prefetch_related(*PREFETCH)
         )
 
         ahora = timezone.now()
@@ -107,6 +115,9 @@ class TableroView(APIView):
                 "dias_en_etapa": (ahora - desde).days,
                 "cotizacion_numero": cot.numero if cot else None,
                 "total": str(cot.total) if cot else None,
+                "pagado": str(cot.total_pagado) if cot else None,
+                "por_confirmar": str(cot.total_por_confirmar) if cot else None,
+                "saldo_por_cobrar": str(cot.saldo_por_cobrar) if cot and cot.estado == "aprobada" else None,
                 "cotizaciones_rechazadas": sum(
                     1 for c in s.cotizaciones.all() if c.estado == "rechazada"
                 ),
@@ -123,6 +134,7 @@ class TableroView(APIView):
 
 
 class SeguimientoListCreateView(APIView):
+    permission_classes = [Requiere(("tablero", "solicitudes"))]
     """Bitácora de una solicitud. Las notas las escribe el comercial."""
 
     def get(self, request, solicitud_id):
@@ -161,6 +173,7 @@ def _ultimos_meses(hoy, n):
 
 
 class TableroResumenView(APIView):
+    permission_classes = [Requiere(("tablero",))]
     """Indicadores del negocio para la parte de arriba del tablero.
 
     Todo se calcula al vuelo desde los documentos: ventas = pagos aprobados
@@ -177,9 +190,13 @@ class TableroResumenView(APIView):
         cotizaciones = list(
             Cotizacion.objects
             .select_related("solicitud__cliente", "planta")
-            .prefetch_related("items__planta", "items__material", "ajustes")
+            .prefetch_related("items__planta", "items__material", "ajustes", "pagos")
         )
         pagos = list(Pago.objects.filter(estado="aprobado").select_related("cotizacion__solicitud__cliente"))
+        aprobadas = [c for c in cotizaciones if c.estado == "aprobada"]
+        # Prefetch de pagos ya cargado en `cotizaciones`: se suma en memoria.
+        por_cobrar = sum((c.saldo_por_cobrar for c in aprobadas), Decimal("0"))
+        por_confirmar = sum((c.total_por_confirmar for c in aprobadas), Decimal("0"))
 
         ventas_mes = defaultdict(Decimal)
         for p in pagos:
@@ -232,6 +249,8 @@ class TableroResumenView(APIView):
                 "pagos_por_revisar": Pago.objects.filter(estado="pendiente").count(),
                 "solicitudes_en_curso": en_curso,
                 "despachado_mes": str(despachado_mes),
+                "por_cobrar": str(por_cobrar),
+                "por_confirmar": str(por_confirmar),
             },
             "por_mes": [
                 {"mes": m, "ventas": str(ventas_mes[m]), "cotizado": str(cotizado_mes[m])}

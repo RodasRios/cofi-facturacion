@@ -16,3 +16,8 @@ export async function setPlantaActiva(id: number, activa: boolean): Promise<Plan
   const res = await client.patch(`/plantas/${id}/`, { activa });
   return res.data;
 }
+
+export async function actualizarPlanta(id: number, data: Partial<Pick<Planta, "nombre" | "ubicacion" | "whatsapp" | "email">>): Promise<Planta> {
+  const res = await client.patch(`/plantas/${id}/`, data);
+  return res.data;
+}

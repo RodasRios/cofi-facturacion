@@ -3,7 +3,7 @@ import type { User } from "../types";
 
 export type UsuarioDatos = Partial<Pick<User,
   "username" | "email" | "nombre" | "cedula" | "rol" | "cargo" | "telefono" |
-  "is_admin" | "is_superadmin" | "is_active">> & { password?: string };
+  "is_admin" | "is_superadmin" | "is_active" | "permisos" | "plantas">> & { password?: string };
 
 export async function getUsuarios(): Promise<User[]> {
   const res = await client.get("/users/");

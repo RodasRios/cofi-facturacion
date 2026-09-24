@@ -6,6 +6,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from api.permissions import PERMISOS_POR_ROL
+
 from decimal import Decimal
 
 from api.models import (
@@ -23,10 +25,10 @@ class TokenVinculacionTest(TestCase):
     """Link de vinculación: el comercial lo genera, el cliente lo llena."""
 
     def setUp(self):
-        self.comercial = User(username="com", rol="comercial")
+        self.comercial = User(username="com", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"])
         self.comercial.set_password("x")
         self.comercial.save()
-        self.planta_user = User(username="pl", rol="planta")
+        self.planta_user = User(username="pl", rol="planta", permisos=PERMISOS_POR_ROL["planta"])
         self.planta_user.set_password("x")
         self.planta_user.save()
         self.api = APIClient()
@@ -112,7 +114,7 @@ class ReintentoYTableroTest(TestCase):
         self.api = APIClient()
 
     def _user(self, username, rol):
-        u = User(username=username, rol=rol)
+        u = User(username=username, rol=rol, permisos=PERMISOS_POR_ROL.get(rol, []))
         u.set_password("x")
         u.save()
         return u
@@ -168,17 +170,19 @@ class ReintentoYTableroTest(TestCase):
         self.assertEqual(r.status_code, 400, r.content)
         self.assertEqual(self.solicitud.cotizaciones.count(), 1)
 
-    def test_pago_rechazado_permite_registrar_otro(self):
+    def test_pagos_parciales_y_rechazo(self):
         cot = self._crear_cotizacion()
         self._decidir_cotizacion(cot["id"], True)
+        total = Decimal(Cotizacion.objects.get(id=cot["id"]).total)
 
         self._login(self.comercial)
         r = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 1000}, format="json")
         self.assertEqual(r.status_code, 201, r.content)
         primer_pago = r.json()["id"]
+        self.assertEqual(r.json()["estado"], "pendiente")
 
-        # Con un pago pendiente no se puede registrar otro.
-        r = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 1000}, format="json")
+        # Un abono más que se pase de lo que falta: no.
+        r = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": str(total)}, format="json")
         self.assertEqual(r.status_code, 400, r.content)
 
         self._login(self.financiera)
@@ -186,29 +190,49 @@ class ReintentoYTableroTest(TestCase):
                           {"aprobar": False, "motivo": "Comprobante ilegible"}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
 
-        # Rechazado: ahora sí se puede subir otro sobre la misma cotización.
+        # Rechazado no cuenta: ahora sí cabe el total.
         self._login(self.comercial)
-        r = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 1000}, format="json")
+        r = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": str(total)}, format="json")
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(Pago.objects.filter(cotizacion_id=cot["id"]).count(), 2)
 
-        cotizacion = Cotizacion.objects.get(id=cot["id"])
-        self.assertEqual(cotizacion.pago_vigente.id, r.json()["id"])
-
-    def test_pago_aprobado_genera_orden_una_sola_vez(self):
+    def test_pago_aprobado_ya_no_crea_la_orden(self):
         cot = self._crear_cotizacion()
         self._decidir_cotizacion(cot["id"], True)
-
         self._login(self.comercial)
         pago_id = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 1000},
                                 format="json").json()["id"]
         self._login(self.financiera)
         r = self.api.post(f"/api/v1/pagos/{pago_id}/aprobar/", {"aprobar": True}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(Cotizacion.objects.get(id=cot["id"]).ordenes_suministro.count(), 0)
 
-        # Una sola planta en la cotización ⇒ una sola orden.
-        cotizacion = Cotizacion.objects.get(id=cot["id"])
-        self.assertEqual(cotizacion.ordenes_suministro.count(), 1)
+    def test_orden_de_compra_queda_por_confirmar(self):
+        cot = self._crear_cotizacion()
+        self._decidir_cotizacion(cot["id"], True)
+        self._login(self.comercial)
+        r = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 800,
+                                             "tipo": "orden_compra", "referencia": "OC-778"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["estado"], "por_confirmar")
+        c = Cotizacion.objects.get(id=cot["id"])
+        self.assertTrue(c.habilita_ordenes)
+        self.assertEqual(c.total_por_confirmar, Decimal("800"))
+        self.assertEqual(c.total_pagado, 0)
+
+        r = self.api.get("/api/v1/pagos/cartera/")
+        self.assertEqual(r.status_code, 200, r.content)
+        fila = r.json()[0]
+        self.assertEqual(Decimal(fila["por_confirmar"]), Decimal("800"))
+
+        # Llega la plata: financiera confirma con el monto recibido.
+        self._login(self.financiera)
+        oc = Pago.objects.get(cotizacion_id=cot["id"])
+        r = self.api.post(f"/api/v1/pagos/{oc.id}/aprobar/", {"aprobar": True, "monto": 600}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        c = Cotizacion.objects.get(id=cot["id"])
+        self.assertEqual(c.total_pagado, Decimal("600"))
+        self.assertEqual(c.total_por_confirmar, 0)
 
     def test_tablero_reporta_la_etapa_correcta(self):
         def etapa():
@@ -239,7 +263,19 @@ class ReintentoYTableroTest(TestCase):
 
         self._login(self.financiera)
         self.api.post(f"/api/v1/pagos/{pago_id}/aprobar/", {"aprobar": True}, format="json")
+        self.assertEqual(etapa()["etapa"], "pendiente_orden")
+
+        self._login(self.comercial)
+        c = Cotizacion.objects.get(id=cot2["id"])
+        item = c.items.first()
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": c.id, "planta": item.planta_efectiva.id,
+            "items": [{"cotizacion_item": item.id, "cantidad": str(item.cantidad)}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(etapa()["etapa"], "pendiente_notificacion")
+        self.api.post(f"/api/v1/ordenes-suministro/{r.json()['id']}/notificar/", {"canales": ["manual"]}, format="json")
+        self.assertEqual(etapa()["etapa"], "pendiente_despacho")
 
     def test_nota_de_seguimiento_manual(self):
         self._login(self.comercial)
@@ -259,9 +295,9 @@ class MultiPlantaTest(TestCase):
     """Repartir una cotización entre varias plantas emite una orden por planta."""
 
     def setUp(self):
-        self.comercial = User(username="com", rol="comercial"); self.comercial.set_password("x"); self.comercial.save()
-        self.aprobador = User(username="apr", rol="aprobador"); self.aprobador.set_password("x"); self.aprobador.save()
-        self.financiera = User(username="fin", rol="financiera"); self.financiera.set_password("x"); self.financiera.save()
+        self.comercial = User(username="com", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"]); self.comercial.set_password("x"); self.comercial.save()
+        self.aprobador = User(username="apr", rol="aprobador", permisos=PERMISOS_POR_ROL["aprobador"]); self.aprobador.set_password("x"); self.aprobador.save()
+        self.financiera = User(username="fin", rol="financiera", permisos=PERMISOS_POR_ROL["financiera"]); self.financiera.set_password("x"); self.financiera.save()
 
         self.p1 = Planta.objects.create(nombre="Planta Uno")
         self.p2 = Planta.objects.create(nombre="Planta Dos")
@@ -304,7 +340,7 @@ class MultiPlantaTest(TestCase):
         self.assertEqual(precios["Planta Uno"], Decimal("100.00"))
         self.assertEqual(precios["Planta Dos"], Decimal("150.00"))
 
-    def test_una_orden_por_planta_con_solo_sus_items(self):
+    def _cotizacion_pagada(self):
         self._login(self.comercial)
         cot = self.api.post("/api/v1/cotizaciones/", {
             "solicitud": self.solicitud.id, "planta": self.p1.id,
@@ -313,44 +349,78 @@ class MultiPlantaTest(TestCase):
                 {"material": self.material.id, "planta": self.p2.id, "cantidad": 40},
             ],
         }, format="json").json()
-
-        self._login(self.aprobador)
-        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
-
-        self._login(self.comercial)
-        pago_id = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 12000},
-                                format="json").json()["id"]
-        self._login(self.financiera)
-        r = self.api.post(f"/api/v1/pagos/{pago_id}/aprobar/", {"aprobar": True}, format="json")
-        self.assertEqual(r.status_code, 200, r.content)
-
-        ordenes = OrdenSuministro.objects.filter(cotizacion_id=cot["id"])
-        self.assertEqual(ordenes.count(), 2)
-
-        r = self.api.get("/api/v1/ordenes-suministro/")
-        por_planta = {o["planta_nombre"]: o for o in r.json()}
-        self.assertEqual(len(por_planta["Planta Uno"]["items"]), 1)
-        self.assertEqual(Decimal(por_planta["Planta Uno"]["items"][0]["cantidad"]), Decimal("60.00"))
-        self.assertEqual(Decimal(por_planta["Planta Dos"]["items"][0]["cantidad"]), Decimal("40.00"))
-
-    def test_una_sola_planta_sigue_generando_una_orden(self):
-        """El comportamiento de siempre: sin planta por ítem, todo sale de la de la cotización."""
-        self._login(self.comercial)
-        cot = self.api.post("/api/v1/cotizaciones/", {
-            "solicitud": self.solicitud.id, "planta": self.p1.id,
-            "items": [{"material": self.material.id, "cantidad": 100}],
-        }, format="json").json()
-        self.assertEqual(cot["plantas_nombres"], ["Planta Uno"])
-
         self._login(self.aprobador)
         self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
         self._login(self.comercial)
-        pago_id = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 10000},
+        pago_id = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 5000},
                                 format="json").json()["id"]
         self._login(self.financiera)
         self.api.post(f"/api/v1/pagos/{pago_id}/aprobar/", {"aprobar": True}, format="json")
+        self._login(self.comercial)
+        return Cotizacion.objects.get(id=cot["id"])
 
-        self.assertEqual(OrdenSuministro.objects.filter(cotizacion_id=cot["id"]).count(), 1)
+    def test_ordenes_manuales_parciales_por_planta(self):
+        c = self._cotizacion_pagada()
+        linea_p1 = c.items.get(planta=self.p1)
+        linea_p2 = c.items.get(planta=self.p2)
+
+        r = self.api.get("/api/v1/ordenes-suministro/por-ordenar/")
+        self.assertEqual([x["id"] for x in r.json()], [c.id])
+
+        # Parcial: 25 de los 60 de Planta Uno.
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": c.id, "planta": self.p1.id, "placas_cliente": "SPT880",
+            "fecha_suministro": "2026-10-01",
+            "items": [{"cotizacion_item": linea_p1.id, "cantidad": 25}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Decimal(r.json()["items"][0]["cantidad"]), Decimal("25"))
+        self.assertIn("wa.me", r.json()["whatsapp_url"])
+
+        # Una línea de otra planta no entra en esta orden.
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": c.id, "planta": self.p1.id,
+            "items": [{"cotizacion_item": linea_p2.id, "cantidad": 5}],
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+
+        # No se puede ordenar más del saldo (quedan 35).
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": c.id, "planta": self.p1.id,
+            "items": [{"cotizacion_item": linea_p1.id, "cantidad": 36}],
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": c.id, "planta": self.p1.id,
+            "items": [{"cotizacion_item": linea_p1.id, "cantidad": 35}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": c.id, "planta": self.p2.id,
+            "items": [{"cotizacion_item": linea_p2.id, "cantidad": 40}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(OrdenSuministro.objects.filter(cotizacion=c).count(), 3)
+
+        # Todo ordenado: ya no aparece por ordenar.
+        self.assertEqual(self.api.get("/api/v1/ordenes-suministro/por-ordenar/").json(), [])
+
+    def test_sin_pago_no_hay_orden(self):
+        self._login(self.comercial)
+        cot = self.api.post("/api/v1/cotizaciones/", {
+            "solicitud": self.solicitud.id, "planta": self.p1.id,
+            "items": [{"material": self.material.id, "cantidad": 10}],
+        }, format="json").json()
+        self._login(self.aprobador)
+        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
+        self._login(self.comercial)
+        item = Cotizacion.objects.get(id=cot["id"]).items.first()
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": cot["id"], "planta": self.p1.id,
+            "items": [{"cotizacion_item": item.id, "cantidad": 10}],
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
 
 
 @override_settings(GENERATED_PDF_DIR=_TMP_PDFS)
@@ -358,7 +428,7 @@ class LinkDePedidosTest(TestCase):
     """El cliente arma su propia solicitud de cotización desde un link."""
 
     def setUp(self):
-        self.comercial = User(username="com", rol="comercial"); self.comercial.set_password("x"); self.comercial.save()
+        self.comercial = User(username="com", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"]); self.comercial.set_password("x"); self.comercial.save()
         self.planta = Planta.objects.create(nombre="Planta Uno")
         self.material = Material.objects.create(nombre="Triturado 3/4", unidad_medida="m3")
         self.inactivo = Material.objects.create(nombre="Descontinuado", unidad_medida="m3", activo=False)
@@ -440,7 +510,7 @@ class TarifasEIvaTest(TestCase):
     """Dos listas de precios por planta e IVA discriminado."""
 
     def setUp(self):
-        self.comercial = User(username="com", rol="comercial")
+        self.comercial = User(username="com", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"])
         self.comercial.set_password("x")
         self.comercial.save()
 
@@ -527,7 +597,7 @@ class PlantasActivasTest(TestCase):
     """Las plantas dadas de baja no deben ofrecerse al cotizar."""
 
     def setUp(self):
-        self.admin = User(username="adm", rol="comercial", is_admin=True)
+        self.admin = User(username="adm", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"], is_admin=True)
         self.admin.set_password("x")
         self.admin.save()
         Planta.objects.create(nombre="Planta Real", activa=True)
@@ -560,13 +630,13 @@ class FormatosRealesTest(TestCase):
     def setUp(self):
         from datetime import date as _d
         self._date = _d
-        self.comercial = User(username="paola", nombre="Paola Andrea Posso", rol="comercial",
+        self.comercial = User(username="paola", nombre="Paola Andrea Posso", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"],
                               cargo="Asesora comercial", telefono="3128342898")
         self.comercial.set_password("x")
         self.comercial.save()
-        self.aprobador = User(username="apr", rol="aprobador"); self.aprobador.set_password("x"); self.aprobador.save()
-        self.financiera = User(username="fin", rol="financiera"); self.financiera.set_password("x"); self.financiera.save()
-        self.planta_user = User(username="pla", rol="planta", nombre="Valentina Guzmán",
+        self.aprobador = User(username="apr", rol="aprobador", permisos=PERMISOS_POR_ROL["aprobador"]); self.aprobador.set_password("x"); self.aprobador.save()
+        self.financiera = User(username="fin", rol="financiera", permisos=PERMISOS_POR_ROL["financiera"]); self.financiera.set_password("x"); self.financiera.save()
+        self.planta_user = User(username="pla", rol="planta", permisos=PERMISOS_POR_ROL["planta"], nombre="Valentina Guzmán",
                                 cargo="Asistente administrativa")
         self.planta_user.set_password("x")
         self.planta_user.save()
@@ -598,10 +668,17 @@ class FormatosRealesTest(TestCase):
         self._login(self.aprobador)
         self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
         self._login(self.comercial)
-        pago = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"]}, format="json").json()
+        pago = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": cot["total"]}, format="json").json()
         self._login(self.financiera)
         self.api.post(f"/api/v1/pagos/{pago['id']}/aprobar/", {"aprobar": True}, format="json")
-        return cot, OrdenSuministro.objects.get(cotizacion_id=cot["id"])
+        self._login(self.comercial)
+        item = Cotizacion.objects.get(id=cot["id"]).items.first()
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": cot["id"], "planta": self.planta.id,
+            "items": [{"cotizacion_item": item.id, "cantidad": cantidad}],
+        }, format="json")
+        assert r.status_code == 201, r.content
+        return cot, OrdenSuministro.objects.get(id=r.json()["id"])
 
     def test_numeracion_por_anio_sigue_el_consecutivo_real(self):
         cot, _ = self._hasta_orden()
@@ -698,7 +775,7 @@ class CotizacionControlTest(TestCase):
     """Precio por línea, planta sin precio, cargos/descuentos y notas elegidas."""
 
     def setUp(self):
-        self.comercial = User(username="com", rol="comercial", is_admin=True)
+        self.comercial = User(username="com", rol="comercial", permisos=PERMISOS_POR_ROL["comercial"], is_admin=True)
         self.comercial.set_password("x")
         self.comercial.save()
         self.con_precio = Planta.objects.create(nombre="Planta Con Precio")
@@ -787,6 +864,7 @@ class GestionUsuariosTest(TestCase):
     """Superusuario, admin y usuarios normales: quién puede crear y tocar a quién."""
 
     def _user(self, username, **kw):
+        kw.setdefault("permisos", ["tablero"])
         u = User(username=username, rol=kw.pop("rol", "comercial"), **kw)
         u.set_password("clave-segura")
         u.save()
@@ -874,3 +952,180 @@ class GestionUsuariosTest(TestCase):
         r = self.api.get("/api/v1/tablero/resumen/")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(len(r.json()["por_mes"]), 6)
+
+
+@override_settings(GENERATED_PDF_DIR=_TMP_PDFS, EMAIL_CONFIGURADO=True,
+                   EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   UPLOAD_DIR=_TMP_PDFS / "uploads")
+class PermisosPlantaYNotificacionTest(TestCase):
+    """Permisos por pestaña, plantas asignadas, disponibilidad, aviso a planta y soporte."""
+
+    def _user(self, username, permisos, plantas=()):
+        u = User(username=username, rol="comercial", permisos=permisos)
+        u.set_password("x")
+        u.save()
+        u.plantas.set(plantas)
+        return u
+
+    def _login(self, u):
+        self.api.credentials()
+        r = self.api.post("/api/v1/auth/login", {"username": u.username, "password": "x"}, format="json")
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def setUp(self):
+        self.p1 = Planta.objects.create(nombre="Planta Norte", whatsapp="312 834 2898", email="norte@x.com")
+        self.p2 = Planta.objects.create(nombre="Planta Sur")
+        self.material = Material.objects.create(nombre="Arena", unidad_medida="m3")
+        self.mp1 = MaterialPlanta.objects.create(material=self.material, planta=self.p1, precio_especial=100)
+        self.mp2 = MaterialPlanta.objects.create(material=self.material, planta=self.p2, precio_especial=100)
+        self.admin = self._user("jefe", [])
+        self.admin.is_admin = True
+        self.admin.save()
+        self.despachador = self._user("porteria", ["despachos"], [self.p1])
+        self.api = APIClient()
+
+        cliente = Cliente.objects.create(nombre="Cliente Z", numero_vinculacion="VIN-0001")
+        sol = SolicitudCotizacion.objects.create(numero="SC-0001", cliente=cliente, obra="Obra 1")
+        self.cot = Cotizacion.objects.create(numero="1-2026", solicitud=sol, planta=self.p1, estado="aprobada")
+        from api.models import CotizacionItem
+        self.l1 = CotizacionItem.objects.create(cotizacion=self.cot, material=self.material, planta=self.p1,
+                                                cantidad=50, precio_unitario=100)
+        self.l2 = CotizacionItem.objects.create(cotizacion=self.cot, material=self.material, planta=self.p2,
+                                                cantidad=10, precio_unitario=100)
+        Pago.objects.create(cotizacion=self.cot, monto=1000, estado="aprobado")
+
+    def _orden(self, planta, linea, cantidad):
+        self._login(self.admin)
+        r = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": self.cot.id, "planta": planta.id,
+            "items": [{"cotizacion_item": linea.id, "cantidad": cantidad}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()
+
+    def test_pestanas_segun_permisos(self):
+        self._login(self.despachador)
+        self.assertEqual(self.api.get("/api/v1/despachos/").status_code, 200)
+        self.assertEqual(self.api.get("/api/v1/ordenes-suministro/").status_code, 200)
+        for ruta in ("/api/v1/cotizaciones/", "/api/v1/pagos/", "/api/v1/tablero/", "/api/v1/clientes/"):
+            self.assertEqual(self.api.get(ruta).status_code, 403, ruta)
+        # Leer el catálogo sí; cambiar precios no.
+        self.assertEqual(self.api.get("/api/v1/plantas/").status_code, 200)
+        self.assertEqual(self.api.patch(f"/api/v1/plantas/{self.p1.id}/", {"nombre": "X"}, format="json").status_code, 403)
+
+    def test_solo_ve_las_ordenes_de_su_planta(self):
+        self._orden(self.p1, self.l1, 20)
+        self._orden(self.p2, self.l2, 10)
+        self._login(self.despachador)
+        r = self.api.get("/api/v1/ordenes-suministro/")
+        self.assertEqual([o["planta_nombre"] for o in r.json()], ["Planta Norte"])
+
+    def test_despacho_parcial_y_soporte(self):
+        orden = self._orden(self.p1, self.l1, 20)
+        self._login(self.despachador)
+        r = self.api.post("/api/v1/despachos/", {
+            "orden_suministro": orden["id"], "fecha": "2026-10-02",
+            "items": [{"material": self.material.id, "cantidad": 12}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        despacho_id = r.json()["id"]
+        o = self.api.get(f"/api/v1/ordenes-suministro/{orden['id']}/").json()
+        self.assertEqual(Decimal(o["items"][0]["cantidad_despachada"]), Decimal("12"))
+        self.assertFalse(o["completamente_despachada"])
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        archivo = SimpleUploadedFile("tiquete.jpg", b"\xff\xd8\xff fake", content_type="image/jpeg")
+        r = self.api.post(f"/api/v1/despachos/{despacho_id}/soporte/", {"file": archivo}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["soporte_path"].endswith(".jpg"))
+        self.assertEqual(self.api.get(f"/api/v1/despachos/{despacho_id}/soporte/").status_code, 200)
+
+    def test_notificar_por_whatsapp_y_correo(self):
+        from django.core import mail
+        orden = self._orden(self.p1, self.l1, 20)
+        self.assertTrue(orden["whatsapp_url"].startswith("https://wa.me/573128342898?text="))
+        r = self.api.post(f"/api/v1/ordenes-suministro/{orden['id']}/notificar/",
+                          {"canales": ["whatsapp", "email"]}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["notificada_planta"])
+        self.assertEqual(r.json()["canales_notificacion"], ["email", "whatsapp"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["norte@x.com"])
+        self.assertEqual(len(mail.outbox[0].attachments), 1)
+
+        # El link del mensaje abre el PDF sin usuario.
+        link = r.json()["link_pdf_publico"]
+        pub = APIClient()
+        resp = pub.get(link.replace("http://testserver", ""))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(pub.get("/api/v1/publico/ordenes/inventado/pdf/").status_code, 404)
+
+    def test_correo_sin_direccion_de_planta(self):
+        orden = self._orden(self.p2, self.l2, 5)
+        r = self.api.post(f"/api/v1/ordenes-suministro/{orden['id']}/notificar/", {"canales": ["email"]}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_disponibilidad_solo_en_sus_plantas(self):
+        usuario = self._user("bascula", ["disponibilidad"], [self.p1])
+        self._login(usuario)
+        r = self.api.patch(f"/api/v1/disponibilidad/materiales/{self.mp1.id}/",
+                           {"disponibilidad": "limitada", "cantidad_disponible": "120.5", "disponibilidad_nota": "Llega más el lunes"},
+                           format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["disponibilidad"], "limitada")
+        r = self.api.patch(f"/api/v1/disponibilidad/materiales/{self.mp2.id}/", {"disponibilidad": "agotada"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.api.get("/api/v1/disponibilidad/?mias=1")
+        self.assertEqual([p["nombre"] for p in r.json()], ["Planta Norte"])
+        # Sin el permiso, no se edita.
+        self._login(self.despachador)
+        r = self.api.patch(f"/api/v1/disponibilidad/materiales/{self.mp1.id}/", {"disponibilidad": "agotada"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_permisos_invalidos_se_rechazan(self):
+        self._login(self.admin)
+        r = self.api.post("/api/v1/users/", {"username": "nuevo", "password": "temporal123",
+                                             "permisos": ["despachos", "inventado"]}, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.api.post("/api/v1/users/", {"username": "nuevo", "password": "temporal123",
+                                             "permisos": ["despachos"], "plantas": [self.p1.id]}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["plantas"], [self.p1.id])
+
+    def test_reiniciar_datos_conserva_catalogo_y_usuarios(self):
+        from django.core.management import call_command
+        self._orden(self.p1, self.l1, 20)
+        call_command("reiniciar_datos", "--si", stdout=open("/dev/null", "w"))
+        self.assertEqual(Cotizacion.objects.count(), 0)
+        self.assertEqual(Cliente.objects.count(), 0)
+        self.assertEqual(OrdenSuministro.objects.count(), 0)
+        self.assertEqual(MaterialPlanta.objects.count(), 2)
+        self.assertTrue(User.objects.filter(username="jefe").exists())
+
+
+class MigracionOrdenesTest(TestCase):
+    """0012: las órdenes viejas reciben token y los ítems de su planta."""
+
+    def test_backfill(self):
+        import importlib
+        from django.apps import apps as django_apps
+        from api.models import CotizacionItem, OrdenSuministroItem
+        mig = importlib.import_module("api.migrations.0012_permisos_pagos_parciales_ordenes")
+        p1 = Planta.objects.create(nombre="Planta A")
+        p2 = Planta.objects.create(nombre="Planta B")
+        m = Material.objects.create(nombre="Grava")
+        cliente = Cliente.objects.create(nombre="C")
+        sol = SolicitudCotizacion.objects.create(numero="SC-1", cliente=cliente)
+        cot = Cotizacion.objects.create(numero="1-2026", solicitud=sol, planta=p1, estado="aprobada")
+        CotizacionItem.objects.create(cotizacion=cot, material=m, cantidad=7, precio_unitario=1)  # sin planta = p1
+        CotizacionItem.objects.create(cotizacion=cot, material=m, planta=p2, cantidad=3, precio_unitario=1)
+        orden = OrdenSuministro.objects.create(numero="OS-1", cotizacion=cot, planta=p1)
+        mig.tokens_y_items_de_ordenes(django_apps, None)
+        self.assertEqual([i.cantidad for i in OrdenSuministroItem.objects.filter(orden=orden)], [Decimal("7")])
+
+        u = User(username="viejo", rol="financiera")
+        u.set_password("x")
+        u.save()
+        mig.permisos_desde_rol(django_apps, None)
+        u.refresh_from_db()
+        self.assertEqual(u.permisos, ["tablero", "pagos", "aprobar_pagos"])

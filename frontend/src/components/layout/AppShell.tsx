@@ -3,16 +3,8 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { Icon } from "../ui/Icon";
 import { NeuralBackground } from "../ui/NeuralBackground";
+import { NAV, puede, rutaInicial } from "../../lib/permisos";
 
-const NAV_ITEMS = [
-  { path: "/tablero", icon: "dashboard", label: "Tablero" },
-  { path: "/clientes", icon: "groups", label: "Clientes" },
-  { path: "/solicitudes", icon: "request_quote", label: "Solicitudes" },
-  { path: "/cotizaciones", icon: "description", label: "Cotizaciones" },
-  { path: "/pagos", icon: "payments", label: "Pagos" },
-  { path: "/ordenes-suministro", icon: "local_shipping", label: "Órdenes" },
-  { path: "/despachos", icon: "inventory", label: "Despachos" },
-];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -31,7 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <header className="app-header">
         <div className="header-left">
-          <Link to="/" className="logo-link">
+          <Link to={rutaInicial(user)} className="logo-link">
             <img src="/logo.svg" alt="" style={{ height: 26, width: 26 }} />
             <span className="logo-text">Facturación</span>
           </Link>
@@ -39,37 +31,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="header-sep" />
 
           <nav className="header-nav">
-            {NAV_ITEMS.map(item => (
+            {NAV.filter(item => puede(user, ...item.permisos)).map(item => (
               <Link
                 key={item.path}
                 to={item.path}
                 className="nav-item"
+                title={item.label}
                 style={isActive(item.path) ? { color: "#fff", fontWeight: 600, borderLeft: "2px solid rgba(255,255,255,0.8)" } : {}}
               >
                 <Icon name={item.icon} size={16} />
                 <span>{item.label}</span>
               </Link>
             ))}
-            {user?.is_admin && (
-              <Link
-                to="/admin"
-                className="nav-item"
-                style={isActive("/admin") ? { color: "#fff", fontWeight: 600, borderLeft: "2px solid rgba(255,255,255,0.8)" } : {}}
-              >
-                <Icon name="factory" size={16} />
-                <span>Plantas y precios</span>
-              </Link>
-            )}
           </nav>
         </div>
 
         <div className="header-right">
           {user?.is_superadmin ? (
-            <span className="admin-badge"><Icon name="shield_person" size={12} />superusuario</span>
+            <span className="admin-badge" title="Superusuario"><Icon name="shield_person" size={13} /><span className="admin-badge-txt">superusuario</span></span>
           ) : user?.is_admin ? (
-            <span className="admin-badge"><Icon name="admin_panel_settings" size={12} />admin</span>
+            <span className="admin-badge" title="Administrador"><Icon name="admin_panel_settings" size={13} /><span className="admin-badge-txt">admin</span></span>
           ) : (
-            <span className="rol-badge">{user?.rol}</span>
+            null
           )}
           <Link to="/configuracion" className="header-icon-btn header-user" title="Configuración: mis datos, firma y usuarios"
             style={isActive("/configuracion") ? { background: "rgba(255,255,255,0.12)" } : undefined}>
@@ -141,7 +124,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 0 14px;
+          padding: 0 11px;
           font-size: 12.5px;
           font-weight: 500;
           color: rgba(255,255,255,0.65);
@@ -151,6 +134,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           white-space: nowrap;
         }
         .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+        /* Con muchas pestañas no caben los nombres: primero se va el texto del
+           distintivo, después el de las pestañas (queda el ícono con su título). */
+        @media (max-width: 1500px) { .admin-badge-txt { display: none; } }
+        @media (max-width: 1340px) {
+          .nav-item { padding: 0 8px; font-size: 12px; }
+          .header-username, .header-btn-label { display: none; }
+        }
+        @media (max-width: 1180px) { .nav-item span:not(.material-symbols-outlined) { display: none; } .nav-item { padding: 0 12px; } }
 
         .header-right { display: flex; align-items: center; gap: 6px; }
 

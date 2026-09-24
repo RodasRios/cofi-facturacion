@@ -8,14 +8,10 @@ import { useAuth } from "../contexts/AuthContext";
 import { actualizarPerfil, cambiarPassword, uploadFirma, borrarFirma, getFirmaBlob } from "../api/auth";
 import { getUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario, type UsuarioDatos } from "../api/usuarios";
 import { mensajeError } from "../lib/errores";
-import type { Rol, User } from "../types";
+import { getPlantas } from "../api/plantas";
+import { PERMISOS, PLANTILLAS } from "../lib/permisos";
+import type { Permiso, User } from "../types";
 
-const ROLES: { value: Rol; label: string; desc: string; color: string }[] = [
-  { value: "comercial",  label: "Comercial",  desc: "Clientes, solicitudes, cotizaciones y pagos", color: "#2563eb" },
-  { value: "aprobador",  label: "Aprobador",  desc: "Aprueba o rechaza cotizaciones",               color: "#7c3aed" },
-  { value: "financiera", label: "Financiera", desc: "Aprueba o rechaza pagos",                      color: "#0891b2" },
-  { value: "planta",     label: "Planta",     desc: "Notifica órdenes y registra despachos",        color: "#d97706" },
-];
 
 // ─── Mi cuenta ────────────────────────────────────────────────────────────────
 
@@ -207,7 +203,20 @@ function claveTemporal() {
   return Array.from(n, x => abc[x % abc.length]).join("");
 }
 
-const VACIO: UsuarioDatos = { username: "", nombre: "", cedula: "", cargo: "", telefono: "", email: "", rol: "comercial", is_admin: false, is_superadmin: false };
+const VACIO: UsuarioDatos = {
+  username: "", nombre: "", cedula: "", cargo: "", telefono: "", email: "",
+  is_admin: false, is_superadmin: false, permisos: [], plantas: [],
+};
+
+/** Pestañas agrupadas: cada grupo es una pestaña; sus casillas, lo que puede hacer ahí. */
+const GRUPOS = PERMISOS.reduce<{ pestana: string; permisos: typeof PERMISOS }[]>((acc, p) => {
+  const g = acc.find(x => x.pestana === p.pestana);
+  if (g) g.permisos.push(p); else acc.push({ pestana: p.pestana, permisos: [p] });
+  return acc;
+}, []);
+
+/** Qué necesita plantas asignadas: lo que trabaja la gente de planta. */
+const DE_PLANTA: Permiso[] = ["despachos", "disponibilidad"];
 
 function FormUsuario({ inicial, onCerrar }: { inicial: User | null; onCerrar: () => void }) {
   const qc = useQueryClient();
@@ -216,8 +225,16 @@ function FormUsuario({ inicial, onCerrar }: { inicial: User | null; onCerrar: ()
   const [d, setD] = useState<UsuarioDatos>(() => inicial ? {
     username: inicial.username, nombre: inicial.nombre ?? "", cedula: inicial.cedula ?? "",
     cargo: inicial.cargo ?? "", telefono: inicial.telefono ?? "", email: inicial.email ?? "",
-    rol: inicial.rol, is_admin: inicial.is_admin, is_superadmin: inicial.is_superadmin,
+    is_admin: inicial.is_admin, is_superadmin: inicial.is_superadmin,
+    permisos: inicial.permisos, plantas: inicial.plantas,
   } : { ...VACIO });
+  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: () => getPlantas() });
+  const permisos = d.permisos ?? [];
+  const esAdminForm = !!d.is_admin || !!d.is_superadmin;
+  const togglePermiso = (c: Permiso) =>
+    set("permisos", permisos.includes(c) ? permisos.filter(x => x !== c) : [...permisos, c]);
+  const togglePlanta = (id: number) =>
+    set("plantas", (d.plantas ?? []).includes(id) ? (d.plantas ?? []).filter(x => x !== id) : [...(d.plantas ?? []), id]);
   const [clave] = useState(claveTemporal);
   const [creado, setCreado] = useState<{ username: string; clave: string } | null>(null);
   const set = (k: keyof UsuarioDatos, v: unknown) => setD(x => ({ ...x, [k]: v }));
@@ -257,15 +274,52 @@ function FormUsuario({ inicial, onCerrar }: { inicial: User | null; onCerrar: ()
         <label>Teléfono<input className="input-base" value={d.telefono ?? ""} onChange={e => set("telefono", e.target.value)} /></label>
         <label>Correo<input className="input-base" type="email" value={d.email ?? ""} onChange={e => set("email", e.target.value)} /></label>
 
-        <fieldset className="cfg-ancho cfg-roles">
-          <legend>Rol</legend>
-          {ROLES.map(r => (
-            <label key={r.value} className={d.rol === r.value ? "activo" : ""}>
-              <input type="radio" name="rol" checked={d.rol === r.value} onChange={() => set("rol", r.value)} />
-              <span><strong style={{ color: r.color }}>{r.label}</strong><small>{r.desc}</small></span>
-            </label>
-          ))}
+        <fieldset className="cfg-ancho cfg-permisos" disabled={esAdminForm}>
+          <legend>
+            Pestañas y permisos
+            {esAdminForm && <small> — un administrador tiene acceso a todo</small>}
+          </legend>
+          <div className="cfg-plantillas">
+            <span>Plantilla:</span>
+            {PLANTILLAS.map(t => {
+              const igual = t.permisos.length === permisos.length && t.permisos.every(c => permisos.includes(c));
+              return (
+                <button type="button" key={t.nombre} className={igual ? "activo" : ""} onClick={() => set("permisos", [...t.permisos])}>
+                  {t.nombre}
+                </button>
+              );
+            })}
+            <button type="button" onClick={() => set("permisos", [])}>Ninguno</button>
+          </div>
+          <div className="cfg-grupos">
+            {GRUPOS.map(g => (
+              <div key={g.pestana} className={`cfg-grupo ${g.permisos.some(p => permisos.includes(p.clave)) ? "activo" : ""}`}>
+                <strong>{g.pestana}</strong>
+                {g.permisos.map(p => (
+                  <label key={p.clave}>
+                    <input type="checkbox" checked={esAdminForm || permisos.includes(p.clave)} onChange={() => togglePermiso(p.clave)} />
+                    <span>{p.desc}</span>
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
         </fieldset>
+
+        {!esAdminForm && permisos.some(c => DE_PLANTA.includes(c) || c === "ordenes") && (
+          <fieldset className="cfg-ancho cfg-permisos">
+            <legend>Plantas asignadas <small>— sin marcar ninguna, trabaja con todas</small></legend>
+            <div className="cfg-plantillas">
+              {plantas?.map(p => (
+                <button type="button" key={p.id} className={(d.plantas ?? []).includes(p.id) ? "activo" : ""} onClick={() => togglePlanta(p.id)}>
+                  <Icon name={(d.plantas ?? []).includes(p.id) ? "check_box" : "check_box_outline_blank"} size={14} />
+                  {p.nombre.replace("Planta ", "")}
+                </button>
+              ))}
+            </div>
+            <small className="cfg-meta">Solo verá las órdenes, despachos y disponibilidad de las plantas marcadas.</small>
+          </fieldset>
+        )}
 
         {yo?.is_superadmin && (
           <fieldset className="cfg-ancho cfg-privilegios">
@@ -323,6 +377,7 @@ function Usuarios() {
   const qc = useQueryClient();
   const { user: yo } = useAuth();
   const { data: usuarios, isLoading } = useQuery({ queryKey: ["usuarios"], queryFn: getUsuarios });
+  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: () => getPlantas() });
   const [editando, setEditando] = useState<User | "nuevo" | null>(null);
   const [clave, setClave] = useState<{ username: string; clave: string } | null>(null);
   const [verInactivos, setVerInactivos] = useState(false);
@@ -382,12 +437,13 @@ function Usuarios() {
       <div className="cfg-tabla-wrap">
         <table className="table-sharp cfg-tabla">
           <thead>
-            <tr><th>Usuario</th><th>Rol</th><th>Datos para la firma</th><th>Último ingreso</th><th /></tr>
+            <tr><th>Usuario</th><th>Acceso</th><th>Datos para la firma</th><th>Último ingreso</th><th /></tr>
           </thead>
           <tbody>
             {isLoading && <tr><td colSpan={5} className="cfg-vacio">Cargando…</td></tr>}
             {lista.map(u => {
-              const rol = ROLES.find(r => r.value === u.rol);
+              const pestanas = [...new Set(PERMISOS.filter(p => u.permisos.includes(p.clave)).map(p => p.pestana))];
+              const nombresPlantas = (plantas ?? []).filter(p => u.plantas.includes(p.id)).map(p => p.nombre.replace("Planta ", ""));
               const esYo = u.id === yo?.id;
               const tocable = puedeTocar(u);
               return (
@@ -397,10 +453,12 @@ function Usuarios() {
                     <span className="cfg-sub">@{u.username}{esYo && " · tú"}</span>
                   </td>
                   <td>
-                    <span className="badge" style={{ background: `${rol?.color}1f`, color: rol?.color }}>{rol?.label}</span>
                     {u.is_superadmin
                       ? <span className="badge cfg-badge-super">superusuario</span>
-                      : u.is_admin && <span className="badge cfg-badge-admin">admin</span>}
+                      : u.is_admin ? <span className="badge cfg-badge-admin">admin · todo</span>
+                      : pestanas.length ? <span className="cfg-pestanas">{pestanas.join(" · ")}</span>
+                      : <span className="badge cfg-badge-off">sin acceso</span>}
+                    {nombresPlantas.length > 0 && !u.is_admin && <span className="cfg-sub"><Icon name="factory" size={11} /> {nombresPlantas.join(", ")}</span>}
                     {!u.is_active && <span className="badge cfg-badge-off">inactivo</span>}
                     {u.debe_cambiar_password && u.is_active && (
                       <span className="badge cfg-badge-clave" title="Aún no ha cambiado la contraseña temporal">clave temporal</span>
@@ -452,11 +510,10 @@ function Usuarios() {
         </button>
       )}
 
-      <div className="cfg-leyenda">
-        {ROLES.map(r => <span key={r.value}><i style={{ background: r.color }} /><strong>{r.label}:</strong> {r.desc}</span>)}
-        <span><i style={{ background: "#059669" }} /><strong>Admin:</strong> todo lo anterior, plantas, precios y usuarios</span>
-        <span><i style={{ background: "#be123c" }} /><strong>Superusuario:</strong> además gestiona administradores</span>
-      </div>
+      <p className="cfg-meta" style={{ marginTop: 14 }}>
+        Cada pestaña tiene su permiso. Un <strong>administrador</strong> tiene todas, además de plantas, precios y usuarios;
+        el <strong>superusuario</strong> además gestiona administradores.
+      </p>
     </div>
   );
 }
@@ -536,6 +593,22 @@ export function ConfiguracionPage() {
         .cfg-panel { border: 1px solid var(--border); background: var(--bg-surface-2); padding: 16px; margin-bottom: 16px; }
         .cfg-panel-titulo { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .cfg-panel-titulo h4 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+        .cfg-permisos { border: none; padding: 0; margin: 4px 0 0; }
+        .cfg-permisos legend { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; padding: 0; }
+        .cfg-permisos legend small { font-weight: 400; color: var(--text-muted); }
+        .cfg-permisos:disabled .cfg-grupos, .cfg-permisos:disabled .cfg-plantillas { opacity: 0.55; }
+        .cfg-plantillas { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); }
+        .cfg-plantillas button {
+          display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
+          border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary);
+        }
+        .cfg-plantillas button.activo { border-color: var(--accent); background: var(--accent-light); color: var(--accent-text); font-weight: 600; }
+        .cfg-grupos { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+        .cfg-grupo { border: 1px solid var(--border); background: var(--bg-surface); padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
+        .cfg-grupo.activo { border-color: var(--accent); }
+        .cfg-grupo strong { font-size: 12.5px; }
+        .cfg-grupo label { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; color: var(--text-secondary); cursor: pointer; }
+        .cfg-pestanas { font-size: 11.5px; color: var(--text-secondary); }
         .cfg-roles, .cfg-privilegios { border: none; padding: 0; margin: 4px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
         .cfg-roles legend, .cfg-privilegios legend { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; padding: 0; }
         .cfg-roles label, .cfg-privilegios label {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Icon } from "./ui/Icon";
@@ -225,7 +225,8 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
                           const op = b.opciones.find(o => String(o.planta.id) === l.planta);
                           const pct = b.pedido > 0 ? Math.round((Number(l.cantidad) || 0) / b.pedido * 100) : 0;
                           return (
-                            <div key={idx} className="nc-linea">
+                            <Fragment key={idx}>
+                            <div className="nc-linea">
                               <select className="input-base" value={l.planta}
                                 onChange={e => editarLinea(b.item.material, idx, { planta: e.target.value })}>
                                 <option value="">Elige planta</option>
@@ -233,6 +234,7 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
                                   <option key={o.planta.id} value={o.planta.id}
                                     disabled={b.lineas.some((otra, j) => j !== idx && otra.planta === String(o.planta.id))}>
                                     {o.planta.nombre.replace("Planta ", "")} · {pesos(precioDeTarifa(o, tarifa))}
+                                    {o.disponibilidad === "agotada" ? " · AGOTADO" : o.disponibilidad === "limitada" ? " · poca disponibilidad" : ""}
                                   </option>
                                 ))}
                               </select>
@@ -268,6 +270,14 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
                                 </button>
                               ) : <span />}
                             </div>
+                            {op && op.disponibilidad !== "disponible" && (
+                              <p className={`nc-disp ${op.disponibilidad}`}>
+                                <Icon name={op.disponibilidad === "agotada" ? "cancel" : "error"} size={13} />
+                                {op.planta.nombre} reporta {op.disponibilidad === "agotada" ? "este material agotado" : "poca disponibilidad"}
+                                {op.disponibilidadNota && `: ${op.disponibilidadNota}`}
+                              </p>
+                            )}
+                            </Fragment>
                           );
                         })}
                         {b.opciones.length > b.lineas.length && (
@@ -403,6 +413,9 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
         .nc-material { border: 1px solid var(--border); padding: 10px 12px; margin-bottom: 10px; }
         .nc-material-cab { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 8px; }
         .nc-material-cab .nc-tenue { font-size: 12px; }
+        .nc-disp { display: flex; align-items: center; gap: 5px; font-size: 11.5px; margin: -2px 0 6px; }
+        .nc-disp.agotada { color: #dc2626; }
+        .nc-disp.limitada { color: #b45309; }
         .nc-linea {
           display: grid; grid-template-columns: minmax(150px, 1.4fr) 120px minmax(170px, 1.4fr) 110px 32px;
           gap: 8px; align-items: center; margin-bottom: 6px;

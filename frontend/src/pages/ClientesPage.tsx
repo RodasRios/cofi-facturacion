@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { puede } from "../lib/permisos";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getClientes, createCliente, marcarVinculado } from "../api/clientes";
@@ -16,7 +17,7 @@ export function ClientesPage() {
   const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
 
   // Los links de vinculación los genera el comercial (o un admin).
-  const puedeGenerarLinks = !!user && (user.is_admin || user.rol === "comercial");
+  const puedeGenerarLinks = puede(user, "clientes");
   const [showLinks, setShowLinks] = useState(false);
   const [controlAbierto, setControlAbierto] = useState<number | null>(null);
 

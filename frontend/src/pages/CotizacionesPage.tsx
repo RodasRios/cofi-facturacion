@@ -9,6 +9,7 @@ import { PdfViewerModal } from "../components/ui/PdfViewerModal";
 import { NuevaCotizacion } from "../components/NuevaCotizacion";
 import { pesos } from "../lib/cotizacion";
 import { MiFirma } from "../components/MiFirma";
+import { puede } from "../lib/permisos";
 import type { CotizacionEstado } from "../types";
 
 const ESTADO_LABEL: Record<CotizacionEstado, string> = {
@@ -25,16 +26,17 @@ const ESTADO_COLOR: Record<CotizacionEstado, string> = {
 export function CotizacionesPage() {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const puedeAprobar = puede(user, "aprobar_cotizaciones");
+  const puedeArmar = puede(user, "cotizaciones");
   const { data: cotizaciones, isLoading } = useQuery({ queryKey: ["cotizaciones"], queryFn: () => getCotizaciones() });
   // Sin filtrar por estado: una solicitud rechazada queda "en_seguimiento" y
   // también se puede volver a cotizar. Lo que manda es no tener cotización viva.
-  const { data: todasSolicitudes } = useQuery({ queryKey: ["solicitudes"], queryFn: () => getSolicitudes() });
+  const { data: todasSolicitudes } = useQuery({ queryKey: ["solicitudes"], queryFn: () => getSolicitudes(), enabled: puedeArmar });
   const solicitudes = useMemo(
     () => (todasSolicitudes ?? []).filter(s => !s.tiene_cotizacion && s.estado !== "cerrada"),
     [todasSolicitudes],
   );
 
-  const puedeAprobar = user?.is_admin || user?.rol === "aprobador";
   const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
 
   const [showForm, setShowForm] = useState(false);
@@ -53,12 +55,14 @@ export function CotizacionesPage() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Cotizaciones</h1>
-        <button className="btn-primary" onClick={() => setShowForm(v => !v)}>
-          <Icon name="add" size={16} />Nueva cotización
-        </button>
+        {puedeArmar && (
+          <button className="btn-primary" onClick={() => setShowForm(v => !v)}>
+            <Icon name="add" size={16} />Nueva cotización
+          </button>
+        )}
       </div>
 
-      {(user?.is_admin || user?.rol === "comercial") && !user?.firma_path && <MiFirma />}
+      {puedeArmar && !user?.firma_path && <MiFirma />}
 
       {showForm && (
         <NuevaCotizacion

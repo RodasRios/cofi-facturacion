@@ -3,7 +3,7 @@ from .models import (
     User, Planta, Material, MaterialPlanta, Cliente, ClienteToken,
     SolicitudCotizacion, SolicitudCotizacionItem,
     Cotizacion, CotizacionItem, CotizacionAjuste, Pago, OrdenSuministro, Seguimiento, SolicitudToken,
-    Despacho, DespachoItem,
+    Despacho, DespachoItem, OrdenSuministroItem,
 )
 
 
@@ -18,7 +18,7 @@ class UserOutSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "email", "nombre", "cedula", "rol", "cargo", "telefono",
             "is_admin", "is_superadmin", "is_active", "debe_cambiar_password",
-            "firma_path", "last_login", "created_at",
+            "permisos", "plantas", "firma_path", "last_login", "created_at",
         ]
 
 
@@ -34,8 +34,18 @@ class UserWriteSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "username", "email", "nombre", "cedula", "rol", "cargo", "telefono",
-            "is_admin", "is_superadmin", "is_active", "password",
+            "is_admin", "is_superadmin", "is_active", "password", "permisos", "plantas",
         ]
+        extra_kwargs = {"plantas": {"required": False}}
+
+    def validate_permisos(self, v):
+        from api.permissions import CLAVES
+        if not isinstance(v, list):
+            raise serializers.ValidationError("Debe ser una lista.")
+        desconocidos = [c for c in v if c not in CLAVES]
+        if desconocidos:
+            raise serializers.ValidationError(f"Permisos desconocidos: {', '.join(desconocidos)}")
+        return [c for c in CLAVES if c in v]
 
     def validate_username(self, v):
         v = v.strip().lower()
@@ -50,6 +60,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
+        plantas = validated_data.pop("plantas", None)
         if not password:
             raise serializers.ValidationError({"password": "Asigna una contraseña inicial."})
         user = User(**validated_data)
@@ -57,16 +68,21 @@ class UserWriteSerializer(serializers.ModelSerializer):
         # La puso otra persona: que la cambie al entrar.
         user.debe_cambiar_password = True
         user.save()
+        if plantas is not None:
+            user.plantas.set(plantas)
         return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop("password", None)
+        plantas = validated_data.pop("plantas", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if password:
             instance.set_password(password)
             instance.debe_cambiar_password = True
         instance.save()
+        if plantas is not None:
+            instance.plantas.set(plantas)
         return instance
 
 
@@ -84,15 +100,30 @@ class PerfilSerializer(serializers.ModelSerializer):
 class PlantaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Planta
-        fields = ["id", "nombre", "ubicacion", "activa", "created_at"]
+        fields = [
+            "id", "nombre", "ubicacion", "activa", "whatsapp", "email",
+            "nota_disponibilidad", "nota_actualizada_at", "created_at",
+        ]
+        read_only_fields = ["nota_actualizada_at"]
 
 
 class MaterialPlantaSerializer(serializers.ModelSerializer):
     planta_nombre = serializers.CharField(source="planta.nombre", read_only=True)
+    material_nombre = serializers.CharField(source="material.nombre", read_only=True)
+    unidad_medida = serializers.CharField(source="material.unidad_medida", read_only=True)
+    disponibilidad_actualizada_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = MaterialPlanta
-        fields = ["id", "material", "planta", "planta_nombre", "precio_especial", "precio_detal"]
+        fields = [
+            "id", "material", "material_nombre", "unidad_medida", "planta", "planta_nombre",
+            "precio_especial", "precio_detal", "disponibilidad", "cantidad_disponible",
+            "disponibilidad_nota", "disponibilidad_actualizada_at", "disponibilidad_actualizada_por_nombre",
+        ]
+
+    def get_disponibilidad_actualizada_por_nombre(self, obj):
+        u = obj.disponibilidad_actualizada_por
+        return (u.nombre or u.username) if u else None
 
 
 class MaterialSerializer(serializers.ModelSerializer):
@@ -212,13 +243,24 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
     unidad_medida = serializers.CharField(source="material.unidad_medida", read_only=True)
     subtotal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     planta_nombre = serializers.SerializerMethodField()
+    planta_efectiva = serializers.SerializerMethodField()
+    cantidad_ordenada = serializers.SerializerMethodField()
 
     class Meta:
         model = CotizacionItem
         fields = [
             "id", "material", "material_nombre", "unidad_medida", "planta", "planta_nombre",
-            "cantidad", "precio_unitario", "origen_precio", "subtotal",
+            "planta_efectiva", "cantidad", "precio_unitario", "origen_precio", "subtotal",
+            "cantidad_ordenada",
         ]
+
+    def get_planta_efectiva(self, obj):
+        planta = obj.planta_efectiva
+        return planta.id if planta else None
+
+    def get_cantidad_ordenada(self, obj):
+        """Lo que ya salió en órdenes de suministro; el resto es el saldo por ordenar."""
+        return str(sum((oi.cantidad for oi in obj.ordenes_items.all()), 0))
 
     def get_planta_nombre(self, obj):
         """Cae a la planta de la cotización para las líneas viejas sin planta propia."""
@@ -252,8 +294,14 @@ class CotizacionSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     tiene_orden_suministro = serializers.SerializerMethodField()
     plantas_nombres = serializers.SerializerMethodField()
-    tiene_pago = serializers.SerializerMethodField()
     pagos_rechazados = serializers.SerializerMethodField()
+    total_pagado = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_en_revision = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_por_confirmar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    saldo_por_cobrar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    saldo_sin_registrar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    habilita_ordenes = serializers.BooleanField(read_only=True)
+    porcentaje_ordenado = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -264,7 +312,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "tipo_precio", "iva_porcentaje", "subtotal_materiales", "ajustes",
             "subtotal", "iva", "total", "notas_aclaratorias",
             "creado_por", "creado_por_username", "tiene_orden_suministro",
-            "plantas_nombres", "tiene_pago", "pagos_rechazados", "created_at",
+            "plantas_nombres", "pagos_rechazados", "total_pagado", "total_en_revision",
+            "total_por_confirmar", "saldo_por_cobrar", "saldo_sin_registrar",
+            "habilita_ordenes", "porcentaje_ordenado", "created_at",
         ]
         read_only_fields = [
             "numero", "estado", "creado_por", "aprobado_por", "fecha_aprobacion",
@@ -278,9 +328,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
         """Todas las plantas que despachan esta cotización, no solo la principal."""
         return [p.nombre for p in obj.plantas]
 
-    def get_tiene_pago(self, obj):
-        """Solo cuenta el pago vivo — uno rechazado deja subir otro comprobante."""
-        return obj.pago_vigente is not None
+    def get_porcentaje_ordenado(self, obj):
+        return round(float(obj.fraccion_ordenada) * 100)
 
     def get_pagos_rechazados(self, obj):
         return sum(1 for p in obj.pagos.all() if p.estado == "rechazado")
@@ -288,42 +337,61 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
 class PagoSerializer(serializers.ModelSerializer):
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True)
+    cliente_nombre = serializers.CharField(source="cotizacion.solicitud.cliente.nombre", read_only=True)
     aprobado_por_username = serializers.CharField(source="aprobado_por.username", read_only=True)
+    creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
 
     class Meta:
         model = Pago
         fields = [
-            "id", "cotizacion", "cotizacion_numero", "monto", "comprobante_path",
-            "estado", "aprobado_por", "aprobado_por_username", "fecha_aprobacion",
-            "motivo_rechazo", "creado_por", "created_at",
+            "id", "cotizacion", "cotizacion_numero", "cliente_nombre", "tipo", "tipo_display",
+            "monto", "referencia", "fecha_pago", "notas", "comprobante_path",
+            "estado", "estado_display", "aprobado_por", "aprobado_por_username", "fecha_aprobacion",
+            "motivo_rechazo", "creado_por", "creado_por_username", "created_at",
         ]
         read_only_fields = ["estado", "creado_por", "aprobado_por", "fecha_aprobacion", "comprobante_path"]
 
 
+class OrdenSuministroItemSerializer(serializers.ModelSerializer):
+    material = serializers.IntegerField(source="cotizacion_item.material_id", read_only=True)
+    material_nombre = serializers.CharField(source="cotizacion_item.material.nombre", read_only=True)
+    unidad_medida = serializers.CharField(source="cotizacion_item.material.unidad_medida", read_only=True)
+    cantidad_despachada = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenSuministroItem
+        fields = ["id", "cotizacion_item", "material", "material_nombre", "unidad_medida",
+                  "cantidad", "cantidad_despachada"]
+
+    def get_cantidad_despachada(self, obj):
+        return str(obj.orden.cantidad_despachada(obj.cotizacion_item.material_id))
+
+
 class OrdenSuministroSerializer(serializers.ModelSerializer):
     planta_nombre = serializers.CharField(source="planta.nombre", read_only=True)
+    planta_whatsapp = serializers.CharField(source="planta.whatsapp", read_only=True)
+    planta_email = serializers.CharField(source="planta.email", read_only=True)
     cotizacion_numero = serializers.CharField(source="cotizacion.numero", read_only=True)
     cliente_nombre = serializers.CharField(source="cotizacion.solicitud.cliente.nombre", read_only=True)
-    obra = serializers.CharField(source="cotizacion.solicitud.obra", read_only=True)
-    items = serializers.SerializerMethodField()
+    obra = serializers.CharField(source="obra_efectiva", read_only=True)
+    notificada_por_username = serializers.CharField(source="notificada_por.username", read_only=True)
+    creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
+    items = OrdenSuministroItemSerializer(many=True, read_only=True)
+    completamente_despachada = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = OrdenSuministro
         fields = [
             "id", "numero", "cotizacion", "cotizacion_numero", "cliente_nombre",
-            "planta", "planta_nombre", "obra", "notificada_planta", "fecha_notificacion",
+            "planta", "planta_nombre", "planta_whatsapp", "planta_email", "obra",
+            "notificada_planta", "fecha_notificacion", "notificada_por_username", "canales_notificacion",
             "fecha_suministro", "placas_empresa", "placas_cliente",
-            "notas", "pdf_path", "items", "creado_por", "created_at",
+            "notas", "pdf_path", "items", "completamente_despachada",
+            "creado_por", "creado_por_username", "created_at",
         ]
         read_only_fields = ["numero", "creado_por", "pdf_path", "notificada_planta", "fecha_notificacion"]
-
-    def get_items(self, obj):
-        """Solo la parte que le toca despachar a esta planta."""
-        items = [
-            i for i in obj.cotizacion.items.all()
-            if i.planta_efectiva and i.planta_efectiva.id == obj.planta_id
-        ]
-        return CotizacionItemSerializer(items, many=True).data
 
 
 class DespachoItemSerializer(serializers.ModelSerializer):
@@ -346,6 +414,6 @@ class DespachoSerializer(serializers.ModelSerializer):
         fields = [
             "id", "numero", "orden_suministro", "orden_suministro_numero", "planta_nombre",
             "cliente_nombre", "consecutivo", "fecha", "recibido_por", "cliente_retira", "placa_vehiculo",
-            "notas", "pdf_path", "items", "creado_por", "created_at",
+            "notas", "pdf_path", "soporte_path", "items", "creado_por", "created_at",
         ]
-        read_only_fields = ["numero", "creado_por", "pdf_path"]
+        read_only_fields = ["numero", "creado_por", "pdf_path", "soporte_path"]

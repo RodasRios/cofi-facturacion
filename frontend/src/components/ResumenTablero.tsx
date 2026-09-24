@@ -95,6 +95,8 @@ export function ResumenTablero() {
         <Kpi icon="pending_actions" titulo="Por aprobar" valor={String(k.pendientes_aprobacion)}
           detalle={`${k.pagos_por_revisar} pago${k.pagos_por_revisar === 1 ? "" : "s"} por revisar`}
           alerta={k.pendientes_aprobacion + k.pagos_por_revisar > 0} />
+        <Kpi icon="account_balance_wallet" titulo="Por cobrar" valor={corto(Number(k.por_cobrar))}
+          detalle={Number(k.por_confirmar) > 0 ? `${corto(Number(k.por_confirmar))} con orden de compra` : "cotizaciones aprobadas"} />
         <Kpi icon="local_shipping" titulo="Despachado del mes"
           valor={Number(k.despachado_mes).toLocaleString("es-CO", { maximumFractionDigits: 1 })}
           detalle={`${k.solicitudes_en_curso} solicitudes en curso`} />

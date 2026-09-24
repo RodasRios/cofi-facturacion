@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { Icon } from "../components/ui/Icon";
 import { getTablero, getSeguimientos, crearNota } from "../api/tablero";
 import { ResumenTablero } from "../components/ResumenTablero";
-import type { EtapaFlujo, FilaTablero, Rol, SeguimientoTipo } from "../types";
+import { getCartera } from "../api/pagos";
+import type { EtapaFlujo, FilaCartera, FilaTablero, Rol, SeguimientoTipo } from "../types";
 
 // Las etapas en el orden del flujo, con el color que las identifica.
 const ETAPA_COLOR: Record<EtapaFlujo, { bg: string; color: string }> = {
@@ -13,6 +14,7 @@ const ETAPA_COLOR: Record<EtapaFlujo, { bg: string; color: string }> = {
   pendiente_aprobacion:      { bg: "#f59e0b22", color: "#f59e0b" },
   pendiente_pago:            { bg: "#8b5cf622", color: "#8b5cf6" },
   pendiente_aprobacion_pago: { bg: "#3b82f622", color: "#3b82f6" },
+  pendiente_orden:           { bg: "#6366f122", color: "#6366f1" },
   pendiente_notificacion:    { bg: "#06b6d422", color: "#0891b2" },
   pendiente_despacho:        { bg: "#14b8a622", color: "#0d9488" },
   despachada:                { bg: "#22c55e22", color: "#16a34a" },
@@ -20,7 +22,7 @@ const ETAPA_COLOR: Record<EtapaFlujo, { bg: string; color: string }> = {
 
 const ETAPA_ORDEN: EtapaFlujo[] = [
   "pendiente_cotizacion", "en_seguimiento", "pendiente_aprobacion", "pendiente_pago",
-  "pendiente_aprobacion_pago", "pendiente_notificacion", "pendiente_despacho", "despachada",
+  "pendiente_aprobacion_pago", "pendiente_orden", "pendiente_notificacion", "pendiente_despacho", "despachada",
 ];
 
 const ROL_LABEL: Record<Rol, string> = {
@@ -110,6 +112,57 @@ function Bitacora({ solicitudId }: { solicitudId: number }) {
   );
 }
 
+/** Estado de cobro de la solicitud: pagado, respaldado por orden de compra, saldo. */
+function Cobro({ f }: { f: FilaTablero }) {
+  if (f.saldo_por_cobrar == null) return <span className="tb-tenue">—</span>;
+  const total = Number(f.total) || 1;
+  const pagado = Number(f.pagado ?? 0);
+  const oc = Number(f.por_confirmar ?? 0);
+  const saldo = Number(f.saldo_por_cobrar);
+  if (saldo <= 0) return <span className="badge" style={{ background: "#16a34a1f", color: "#16a34a" }}>Pagada</span>;
+  return (
+    <span className="tb-cobro" title={`Pagado ${moneda(String(pagado))} · Orden de compra ${moneda(String(oc))} · Saldo ${moneda(String(saldo))}`}>
+      <span className="tb-barra"><i className="pagado" style={{ width: `${(pagado / total) * 100}%` }} /><i className="oc" style={{ width: `${(oc / total) * 100}%` }} /></span>
+      <span className="tb-tenue">{Math.round((pagado / total) * 100)}% pagado{oc > 0 && " · con OC"}</span>
+    </span>
+  );
+}
+
+/** Lo que falta por cobrar, con lo respaldado por orden de compra aparte. */
+function Cartera() {
+  const { data: filas } = useQuery({ queryKey: ["cartera"], queryFn: getCartera });
+  if (!filas?.length) return null;
+  const suma = (k: keyof FilaCartera) => filas.reduce((t, f) => t + Number(f[k] ?? 0), 0);
+  return (
+    <section className="card tb-cartera">
+      <div className="tb-cartera-cab">
+        <h2>Cartera por cobrar</h2>
+        <span>Por cobrar <strong>{moneda(String(suma("saldo_por_cobrar")))}</strong></span>
+        <span>Con orden de compra <strong style={{ color: "#7c3aed" }}>{moneda(String(suma("por_confirmar")))}</strong></span>
+        <span>Sin respaldo <strong style={{ color: "#dc2626" }}>{moneda(String(suma("sin_respaldo")))}</strong></span>
+      </div>
+      <table className="table-sharp">
+        <thead><tr><th>Cotización</th><th style={{ textAlign: "right" }}>Total</th><th style={{ textAlign: "right" }}>Pagado</th>
+          <th style={{ textAlign: "right" }}>En revisión</th><th style={{ textAlign: "right" }}>Orden de compra</th>
+          <th style={{ textAlign: "right" }}>Sin respaldo</th><th style={{ textAlign: "right" }}>Por cobrar</th></tr></thead>
+        <tbody>
+          {filas.map(f => (
+            <tr key={f.cotizacion_id}>
+              <td><strong>{f.cotizacion_numero}</strong><span className="tb-tenue" style={{ display: "block" }}>{f.cliente_nombre}</span></td>
+              <td className="tb-num">{moneda(f.total)}</td>
+              <td className="tb-num">{moneda(f.pagado)}</td>
+              <td className="tb-num">{Number(f.en_revision) ? moneda(f.en_revision) : "—"}</td>
+              <td className="tb-num" style={Number(f.por_confirmar) ? { color: "#7c3aed", fontWeight: 600 } : undefined}>{Number(f.por_confirmar) ? moneda(f.por_confirmar) : "—"}</td>
+              <td className="tb-num" style={Number(f.sin_respaldo) ? { color: "#dc2626" } : undefined}>{Number(f.sin_respaldo) ? moneda(f.sin_respaldo) : "—"}</td>
+              <td className="tb-num"><strong>{moneda(f.saldo_por_cobrar)}</strong></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 export function TableroPage() {
   const [filtro, setFiltro] = useState<EtapaFlujo | "todas">("todas");
   const [abierta, setAbierta] = useState<number | null>(null);
@@ -131,6 +184,7 @@ export function TableroPage() {
       </div>
 
       <ResumenTablero />
+      <Cartera />
 
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Seguimiento de solicitudes</h2>
@@ -174,11 +228,12 @@ export function TableroPage() {
               <th>Lleva</th>
               <th>Cotización</th>
               <th style={{ textAlign: "right" }}>Total</th>
+              <th>Cobro</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td colSpan={8} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
+            {isLoading && <tr><td colSpan={9} style={{ textAlign: "center", padding: 20 }}>Cargando…</td></tr>}
             {visibles?.map((f: FilaTablero) => {
               const c = ETAPA_COLOR[f.etapa];
               const lento = f.etapa !== "despachada" && f.dias_en_etapa >= 3;
@@ -201,6 +256,7 @@ export function TableroPage() {
                   </td>
                   <td>{f.cotizacion_numero ?? "-"}</td>
                   <td style={{ textAlign: "right" }}>{moneda(f.total)}</td>
+                  <td><Cobro f={f} /></td>
                   <td style={{ textAlign: "right" }}>
                     <button
                       className="btn-ghost"
@@ -213,13 +269,13 @@ export function TableroPage() {
                 </tr>,
                 abierta === f.solicitud_id && (
                   <tr key={`${f.solicitud_id}-bitacora`} className="fila-bitacora">
-                    <td colSpan={8}><Bitacora solicitudId={f.solicitud_id} /></td>
+                    <td colSpan={9}><Bitacora solicitudId={f.solicitud_id} /></td>
                   </tr>
                 ),
               ];
             })}
             {!isLoading && visibles?.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>
+              <tr><td colSpan={9} style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>
                 Nada en esta etapa
               </td></tr>
             )}
@@ -228,6 +284,15 @@ export function TableroPage() {
       </div>
 
       <style>{`
+        .tb-tenue { font-size: 11px; color: var(--text-muted); }
+        .tb-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .tb-cobro { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+        .tb-barra { display: flex; height: 6px; background: var(--bg-surface-2); gap: 2px; }
+        .tb-barra i { display: block; height: 100%; }
+        .tb-barra i.pagado { background: #16a34a; } .tb-barra i.oc { background: #7c3aed; }
+        .tb-cartera { padding: 14px; margin-bottom: 18px; overflow-x: auto; }
+        .tb-cartera-cab { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary); }
+        .tb-cartera-cab h2 { font-size: 13px; font-weight: 700; margin: 0; color: var(--text-primary); margin-right: auto; }
         .etapa-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
         .etapa-chip {
           background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-secondary);

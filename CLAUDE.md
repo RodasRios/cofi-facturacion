@@ -17,7 +17,7 @@ The owner is not an experienced programmer and works alone on this repo — ther
 
 **cofi-facturacion** is a full-stack web app for **Triturados y Concretos Ltda**, covering the commercial/dispatch flow for selling materials (triturados, agregados) from quarry plants to clients. It was scaffolded from `cofi-gestor-insumos` (a sibling project by the same owner) — the JWT auth pattern, the ReportLab PDF-generation approach, and the frontend theme/CSS were reused, but the domain and data model are entirely different and unrelated. **Do not assume any data or business rules carry over between the two repos** beyond those three reused mechanisms.
 
-Unlike `cofi-gestor-insumos`, this project is **single-tenant** (one company, no `Empresa`/multi-tenant layer) and has **no superadmin tier** — just `is_admin` as a blanket override on top of per-user roles.
+Unlike `cofi-gestor-insumos`, this project is **single-tenant** (one company, no `Empresa`/multi-tenant layer). Access is per-tab permissions (`User.permisos`), `is_admin` as a blanket override, and one `is_superadmin` tier for the owner (see "Permisos por pestaña" below).
 
 ### The flow (and where it currently stops)
 
@@ -27,11 +27,11 @@ Cliente (nuevo o existente)
   → Solicitud de Cotización                  [comercial]
   → Formato de Cotización                    [comercial arma la cotización, PDF auto-generado]
   → Aprobación                               [aprobador aprueba/rechaza]
-  → Pago por transferencia                   [comercial registra + sube comprobante]
-  → Aprobación de pago                       [financiera aprueba/rechaza]
-  → Formato de Orden de Suministro           [se crea automáticamente al aprobar el pago, PDF auto-generado]
-  → Notificación a Planta                    [planta marca la orden como notificada]
-  → Control de Despacho y Recibo de Material [planta genera la remisión, PDF auto-generado]
+  → Pagos parciales y/o orden de compra      [permiso "pagos"; pueden ser varios abonos]
+  → Aprobación de pago / confirmación de OC  [permiso "aprobar_pagos"]
+  → Formato de Orden de Suministro           [MANUAL, permiso "ordenes"; parcial, con placas y fecha; PDF auto-generado]
+  → Notificación a Planta                    [WhatsApp Web / correo con el PDF, desde Órdenes]
+  → Control de Despacho y Recibo de Material [permiso "despachos"; parcial, con foto/PDF del tiquete]
 ```
 
 This is deliberately scoped to **stop at the despacho/remisión step**. The rest of the real-world flow (archivo de control de despachos, liquidación, factura electrónica, cruce de cuentas) is out of scope and not built — see the flowchart the owner shared when this repo was created if that scope ever needs revisiting.
@@ -70,14 +70,14 @@ rechazado no admitía otro comprobante. El diagrama del negocio dice lo
 contrario — ambos "No" pasan por `SEGUIMIENTO CLIENTE` y **vuelven** al paso
 anterior.
 
-- Solo puede haber **una viva a la vez**: `SolicitudCotizacion.cotizacion_vigente`
-  y `Cotizacion.pago_vigente` ignoran las rechazadas y son lo que las vistas
-  consultan antes de permitir crear otra. No hay constraint en la base que lo
-  imponga; la regla vive en las vistas.
+- Solo puede haber **una cotización viva a la vez**:
+  `SolicitudCotizacion.cotizacion_vigente` ignora las rechazadas y es lo que las
+  vistas consultan antes de permitir crear otra. Los pagos ya no siguen esa regla
+  (ver "Pagos parciales"): los rechazados simplemente no suman.
 - Rechazar una cotización deja la solicitud en `estado="en_seguimiento"`; crear
   una nueva la devuelve a `"cotizada"`.
-- Los serializers exponen `tiene_cotizacion` / `tiene_pago` derivados de esos
-  `*_vigente`, y el frontend filtra por ellos (**no** por "tiene alguna fila
+- Los serializers exponen `tiene_cotizacion` derivado de `cotizacion_vigente`,
+  y el frontend filtra por él (**no** por "tiene alguna fila
   relacionada", que es lo que bloqueaba el reintento).
 - Cada rechazo, aprobación y nueva cotización escribe un `Seguimiento`
   automático; las notas manuales las agrega el comercial desde el tablero.
@@ -133,9 +133,9 @@ distintos cobra lo correcto en cada una.
   (la preseleccionada al armar). Nunca la uses como "la planta" de la
   cotización: usa `Cotizacion.plantas` o `CotizacionItem.planta_efectiva`,
   que cae a la de la cotización para las líneas anteriores a este cambio.
-- Al aprobar el pago se emite **una `OrdenSuministro` por planta**, cada una
-  con solo sus ítems, su `numero` y su PDF — porque cada planta despacha por
-  su cuenta. `unique_together (cotizacion, planta)` impide duplicarlas.
+- Cada `OrdenSuministro` es de **una sola planta** y lleva solo líneas de esa
+  planta (`OrdenSuministroItem`), porque cada planta despacha por su cuenta.
+  Ya no se crean solas al aprobar el pago — ver "Órdenes de suministro".
 - El porcentaje del reparto **no se guarda**: se calcula desde las cantidades
   (`frontend/src/lib/cotizacion.ts`). Guardarlo sería un dato que puede quedar
   en contra de las cantidades.
@@ -162,6 +162,56 @@ distintos cobra lo correcto en cada una.
   (`None` = todas, que es como quedan las cotizaciones anteriores). `notas`
   guarda las notas extra, una viñeta por línea.
 
+### Pagos parciales y órdenes de compra (`api/views/pago_views.py`)
+
+Una cotización aprobada se cubre con **varios** `Pago`:
+- `tipo="transferencia"` → `estado="pendiente"` hasta que alguien con
+  `aprobar_pagos` lo aprueba o rechaza.
+- `tipo="orden_compra"` (la OC que entrega el cliente comprometiéndose a pagar)
+  → `estado="por_confirmar"`. Respalda la emisión de órdenes de suministro,
+  pero no es plata: al llegar el pago se "confirma" (pasa a `aprobado`, con el
+  monto que realmente entró) o se anula (`rechazado`).
+- La suma de lo registrado sin contar rechazados no puede pasar de `total`.
+- Todo lo de saldos son propiedades de `Cotizacion` calculadas de los pagos
+  (`total_pagado`, `total_por_confirmar`, `total_en_revision`, `saldo_por_cobrar`,
+  `saldo_sin_registrar`, `habilita_ordenes`); nada se guarda.
+- `GET /pagos/cartera/` y la sección "Cartera por cobrar" del tablero muestran lo
+  pendiente, separando lo respaldado por OC de lo que no tiene respaldo.
+
+### Órdenes de suministro (`api/views/orden_suministro_views.py`)
+
+- **Manuales**: las emite quien tenga `ordenes`, desde "Listas para ordenar"
+  (`GET /ordenes-suministro/por-ordenar/`: aprobadas, con algo pagado o con OC,
+  y con material sin ordenar). Se elige planta, cantidades, obra, fecha de
+  suministro, placas y observación.
+- **Parciales**: `CotizacionItem.cantidad` menos lo ya ordenado es el saldo;
+  `_validar_items()` no deja pasarse. El frontend avisa (no bloquea) si lo
+  ordenado supera lo pagado + OC.
+- Se pueden anular mientras no tengan despachos.
+- **Aviso a planta**: `Planta.whatsapp` / `Planta.email` (se editan en Plantas y
+  precios). El listado trae `whatsapp_url` (wa.me con el mensaje armado) para
+  que el navegador la abra en el mismo clic — si esperara otra respuesta, el
+  navegador bloquearía la ventana. El correo lo manda el servidor
+  (`POST .../notificar/ {canales}`) con el PDF adjunto, si hay `EMAIL_HOST`.
+- El mensaje incluye un link público al PDF (`/publico/ordenes/<token_publico>/pdf/`,
+  sin usuario). Su dominio sale de `PUBLIC_URL`.
+
+### Despachos y disponibilidad
+
+- Los despachos son parciales contra la orden: `OrdenSuministro.cantidad_despachada()`
+  y `completamente_despachada` salen de sumar los `DespachoItem` por material.
+  El soporte (foto/PDF del tiquete firmado) se sube a `POST /despachos/<id>/soporte/`.
+- `MaterialPlanta.disponibilidad` (disponible/limitada/agotada), cantidad y nota,
+  más `Planta.nota_disponibilidad`, los actualiza quien tenga `disponibilidad`
+  (limitado a sus plantas). `NuevaCotizacion` los muestra y manda lo agotado al
+  final de las opciones.
+
+### Borrar datos de prueba
+
+`python manage.py reiniciar_datos` borra clientes, solicitudes, cotizaciones,
+pagos, órdenes, despachos y sus archivos; conserva usuarios, firmas, catálogo,
+precios y disponibilidad. Pide escribir BORRAR (`--si` para no preguntar).
+
 ### Link de pedidos (`SolicitudToken`)
 
 El cliente arma sus propias solicitudes de cotización desde `/pedir/<token>`,
@@ -181,13 +231,35 @@ tengan dueño en el sistema.
 `api/views/tablero_views.py` calcula en qué etapa va cada solicitud **sin
 guardar nada**: `_etapa_de()` la deduce del estado de los documentos colgados de
 la solicitud. Con varias órdenes (una por planta), la solicitud avanza al ritmo
-de la más atrasada: sigue "por notificar" mientras quede una planta sin avisar. No hay campo `etapa` que pueda quedar desincronizado. Si se agrega
+de lo más atrasado: por notificar mientras haya una orden sin avisar, por
+despachar mientras una orden tenga saldo, y "por emitir orden"
+(`pendiente_orden`) mientras quede material cotizado sin ordenar. Sin pago
+aprobado ni OC se queda en "esperando pago". No hay campo `etapa` que pueda quedar desincronizado. Si se agrega
 un paso al flujo, se agrega ahí y en el diccionario `ETAPAS` (que también dice
 qué rol tiene la pelota en cada etapa).
 
-### Roles, administradores y superusuario
+### Permisos por pestaña
 
-`User.rol` (plain `CharField`, not `AbstractUser`) is one of `comercial | aprobador | financiera | planta`, gating the corresponding step above via the permission classes in `api/permissions.py` (`IsComercial`, `IsAprobador`, `IsFinanciera`, `IsPlanta`). `User.is_admin` is a blanket override — `_has_rol()` in `permissions.py` lets an admin through regardless of `rol`. No TOTP/2FA and no multi-tenant layer (both exist in `cofi-gestor-insumos` but were deliberately left out).
+`User.permisos` (JSON, lista de claves) decide qué ve y hace cada usuario. El
+catálogo está en `api/permissions.py::PERMISOS` y **replicado** en
+`frontend/src/lib/permisos.ts` (con las plantillas "Comercial", "Despacho"…
+que usa el formulario de usuarios) — si se agrega uno, se agrega en los dos.
+
+- Una clave por pestaña (`tablero`, `clientes`, `solicitudes`, `cotizaciones`,
+  `pagos`, `ordenes`, `despachos`, `disponibilidad`, `precios`) más dos de
+  aprobación separadas (`aprobar_cotizaciones`, `aprobar_pagos`) para que quien
+  arma no sea quien aprueba.
+- Backend: cada vista declara `permission_classes = [Requiere(lectura, escritura)]`.
+  La lectura suele aceptar varias claves porque una pestaña necesita datos de
+  otra (Órdenes lee cotizaciones; Despachos lee órdenes). `tiene(user, ...)`
+  para chequeos dentro de un método.
+- Frontend: `AppShell` muestra solo las pestañas permitidas, `ProtectedRoute`
+  recibe `permisos` y redirige a `rutaInicial(user)`; los botones usan `puede()`.
+- `User.plantas` (M2M): si tiene plantas asignadas, solo ve y trabaja órdenes,
+  despachos y disponibilidad de esas (`plantas_de(user)`; vacío = todas).
+- `User.rol` quedó como dato histórico: ya **no** da permisos. La migración 0012
+  convirtió los roles viejos en permisos (`PERMISOS_POR_ROL`).
+- No TOTP/2FA (existe en `cofi-gestor-insumos`, se dejó fuera a propósito).
 
 **Superusuario (`User.is_superadmin`)** — la cuenta del dueño. `User.save()` lo
 fuerza a ser también `is_admin`. Reglas en `api/views/user_views.py`:
@@ -291,9 +363,10 @@ Cliente
         ├── Seguimiento  (bitácora de la solicitud: rechazos, aprobaciones y notas del comercial)
         └── Cotizacion  (FK, NO 1:1 — planta elegida aquí, fija de qué MaterialPlanta se toma el precio)
               ├── CotizacionItem → Material + Planta  (precio_unitario es una FOTO tomada del MaterialPlanta de ESA planta al crear la cotización — no vuelve a mirar el precio actual)
-              ├── Pago  (FK, NO 1:1)
-              └── OrdenSuministro  (FK, NO 1:1 — UNA POR PLANTA; se crean automáticamente al aprobar el Pago, no hay endpoint de creación manual)
-                    └── Despacho  (FK a OrdenSuministro, no 1:1 — una orden puede tener varios despachos parciales)
+              ├── Pago  (varios: abonos, transferencias, órdenes de compra del cliente)
+              └── OrdenSuministro  (varias, manuales y parciales; cada una de UNA planta)
+                    ├── OrdenSuministroItem → CotizacionItem  (cuánto de cada línea sale en esta orden)
+                    └── Despacho  (varios, parciales; soporte_path = foto/PDF del tiquete)
                           └── DespachoItem → Material
 ```
 
@@ -367,3 +440,5 @@ Only one `.env`, at `backend/backend_django/.env` (no root-level `.env` yet — 
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | No refresh-token/logout endpoint, same as the sibling project |
 | `UPLOAD_DIR` | `media/uploads` | Currently only used for `auth/firma` (signature images); every other formato is generated, not uploaded |
 | `GENERATED_PDF_DIR` | `media/generated_pdfs` | All four auto-generated formatos land here |
+| `PUBLIC_URL` | (vacío = se deduce de la petición; compose pone `https://facturacion.cofilatam.com`) | Dominio de los links que van por WhatsApp/correo |
+| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` / `DEFAULT_FROM_EMAIL` | vacío | SMTP para avisar a las plantas. Sin `EMAIL_HOST` el botón "Correo" queda deshabilitado |

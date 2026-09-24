@@ -16,7 +16,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
 
 from api.models import Cliente, ClienteToken, VINCULACION_TOKEN_DIAS
-from api.permissions import IsComercial
+from api.permissions import Requiere
 from api.serializers import (
     ClienteSerializer, ClienteTokenSerializer, VinculacionPublicaSerializer,
 )
@@ -29,7 +29,7 @@ class VinculacionPublicaThrottle(AnonRateThrottle):
 
 
 class ClienteTokenListCreateView(APIView):
-    permission_classes = [IsComercial]
+    permission_classes = [Requiere(("clientes",))]
 
     def get(self, request):
         tokens = ClienteToken.objects.select_related("cliente", "creado_por")
@@ -48,7 +48,7 @@ class ClienteTokenListCreateView(APIView):
 
 class ClienteTokenRevocarView(APIView):
     """Anula un link ya enviado (se mandó a quien no era, se repitió, etc.)."""
-    permission_classes = [IsComercial]
+    permission_classes = [Requiere(("clientes",))]
 
     def delete(self, request, token_id):
         token = ClienteToken.objects.filter(id=token_id).first()

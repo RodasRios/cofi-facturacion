@@ -1,5 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from api.permissions import Requiere
 from api.models import SolicitudCotizacion, SolicitudCotizacionItem, Cliente, Material
 from api.serializers import SolicitudCotizacionSerializer
 
@@ -10,6 +11,7 @@ def _numero_solicitud():
 
 
 class SolicitudCotizacionListCreateView(APIView):
+    permission_classes = [Requiere(("solicitudes", "cotizaciones", "tablero"), ("solicitudes",))]
     def get(self, request):
         solicitudes = SolicitudCotizacion.objects.select_related("cliente", "creado_por").prefetch_related("items")
         estado = request.query_params.get("estado")
@@ -47,6 +49,7 @@ class SolicitudCotizacionListCreateView(APIView):
 
 
 class SolicitudCotizacionDetailView(APIView):
+    permission_classes = [Requiere(("solicitudes", "cotizaciones", "tablero"), ("solicitudes",))]
     def get_object(self, solicitud_id):
         return SolicitudCotizacion.objects.filter(id=solicitud_id).first()
 

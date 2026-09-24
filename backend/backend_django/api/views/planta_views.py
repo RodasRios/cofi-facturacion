@@ -2,10 +2,15 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from api.models import Planta
 from api.serializers import PlantaSerializer
-from api.permissions import IsAdmin
+from api.permissions import Requiere
+
+# Leer el catálogo, cualquiera con sesión (se usa al cotizar, despachar…); cambiarlo, "precios".
+CATALOGO = Requiere((), ("precios",))
 
 
 class PlantaListCreateView(APIView):
+    permission_classes = [CATALOGO]
+
     def get(self, request):
         # Por defecto solo las activas: los selectores de cotización y despacho
         # no deben ofrecer plantas dadas de baja. El panel de administración
@@ -16,8 +21,6 @@ class PlantaListCreateView(APIView):
         return Response(PlantaSerializer(plantas, many=True).data)
 
     def post(self, request):
-        if not request.user.is_admin:
-            return Response({"detail": "Solo un administrador puede crear plantas"}, status=403)
         ser = PlantaSerializer(data=request.data)
         if not ser.is_valid():
             return Response(ser.errors, status=400)
@@ -26,10 +29,7 @@ class PlantaListCreateView(APIView):
 
 
 class PlantaDetailView(APIView):
-    def get_permissions(self):
-        if self.request.method in ("PATCH", "DELETE"):
-            return [IsAdmin()]
-        return super().get_permissions()
+    permission_classes = [CATALOGO]
 
     def get_object(self, planta_id):
         return Planta.objects.filter(id=planta_id).first()

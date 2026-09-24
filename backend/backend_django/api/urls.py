@@ -12,11 +12,13 @@ from api.views.cotizacion_views import (
     CotizacionListCreateView, CotizacionDetailView, CotizacionAprobarView, CotizacionPdfView,
     NotasAclaratoriasView,
 )
-from api.views.pago_views import PagoListCreateView, PagoComprobanteUploadView, PagoAprobarView
+from api.views.pago_views import PagoListCreateView, PagoComprobanteUploadView, PagoAprobarView, CarteraView
 from api.views.orden_suministro_views import (
     OrdenSuministroListView, OrdenSuministroDetailView, OrdenSuministroNotificarView, OrdenSuministroPdfView,
+    OrdenSuministroPdfPublicoView, CotizacionesPorOrdenarView,
 )
-from api.views.despacho_views import DespachoListCreateView, DespachoDetailView, DespachoPdfView
+from api.views.disponibilidad_views import DisponibilidadView, DisponibilidadMaterialView, DisponibilidadPlantaView
+from api.views.despacho_views import DespachoListCreateView, DespachoDetailView, DespachoPdfView, DespachoSoporteView
 from api.views.tablero_views import TableroView, TableroResumenView, SeguimientoListCreateView
 from api.views.control_despachos_views import ControlDespachosPdfView
 from api.views.solicitud_token_views import (
@@ -90,18 +92,27 @@ urlpatterns += p("cotizaciones/", CotizacionListCreateView.as_view())
 # Pagos
 urlpatterns += p("pagos/<int:pago_id>/comprobante/", PagoComprobanteUploadView.as_view())
 urlpatterns += p("pagos/<int:pago_id>/aprobar/", PagoAprobarView.as_view())
+urlpatterns += p("pagos/cartera/", CarteraView.as_view())
 urlpatterns += p("pagos/", PagoListCreateView.as_view())
 
 # Órdenes de suministro
 urlpatterns += p("ordenes-suministro/<int:orden_id>/notificar/", OrdenSuministroNotificarView.as_view())
 urlpatterns += p("ordenes-suministro/<int:orden_id>/pdf/", OrdenSuministroPdfView.as_view())
 urlpatterns += p("ordenes-suministro/<int:orden_id>/", OrdenSuministroDetailView.as_view())
+urlpatterns += p("ordenes-suministro/por-ordenar/", CotizacionesPorOrdenarView.as_view())
 urlpatterns += p("ordenes-suministro/", OrdenSuministroListView.as_view())
+urlpatterns += p("publico/ordenes/<str:token>/pdf/", OrdenSuministroPdfPublicoView.as_view())
+
+# Disponibilidad de material por planta
+urlpatterns += p("disponibilidad/materiales/<int:mp_id>/", DisponibilidadMaterialView.as_view())
+urlpatterns += p("disponibilidad/plantas/<int:planta_id>/", DisponibilidadPlantaView.as_view())
+urlpatterns += p("disponibilidad/", DisponibilidadView.as_view())
 
 # Control de despacho de materiales (consolidado por cliente, al vuelo)
 urlpatterns += p("control-despachos/pdf/", ControlDespachosPdfView.as_view())
 
 # Despachos (Control de Despacho y Recibo de Material)
 urlpatterns += p("despachos/<int:despacho_id>/pdf/", DespachoPdfView.as_view())
+urlpatterns += p("despachos/<int:despacho_id>/soporte/", DespachoSoporteView.as_view())
 urlpatterns += p("despachos/<int:despacho_id>/", DespachoDetailView.as_view())
 urlpatterns += p("despachos/", DespachoListCreateView.as_view())

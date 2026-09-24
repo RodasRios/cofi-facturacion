@@ -1,4 +1,4 @@
-import type { Material, OrigenPrecio, Planta, SolicitudCotizacionItem, TipoPrecio } from "../types";
+import type { Disponibilidad, Material, OrigenPrecio, Planta, SolicitudCotizacionItem, TipoPrecio } from "../types";
 
 /** IVA vigente. El servidor tiene la última palabra; esto es para la vista previa. */
 export const IVA_PORCENTAJE = 19;
@@ -28,11 +28,14 @@ export interface OpcionPlanta {
   especial: number;
   /** null si esa planta no maneja tarifa de detal. */
   detal: number | null;
+  /** Lo que reporta la planta en su pestaña de Disponibilidad. */
+  disponibilidad: Disponibilidad;
+  disponibilidadNota: string | null;
 }
 
 /**
  * Plantas activas que tienen precio para el material, de la más barata a la
- * más cara según la tarifa. Una planta sin precio no se ofrece: antes se podía
+ * más cara según la tarifa (las que reportan el material agotado, al final). Una planta sin precio no se ofrece: antes se podía
  * elegir y la línea salía en $0.
  */
 export function plantasConPrecio(material: Material | undefined, plantas: Planta[], tarifa: TipoPrecio): OpcionPlanta[] {
@@ -44,8 +47,12 @@ export function plantasConPrecio(material: Material | undefined, plantas: Planta
       planta: activas.get(pr.planta)!,
       especial: Number(pr.precio_especial),
       detal: pr.precio_detal == null ? null : Number(pr.precio_detal),
+      disponibilidad: pr.disponibilidad ?? "disponible",
+      disponibilidadNota: pr.disponibilidad_nota ?? null,
     }))
-    .sort((a, b) => precioDeTarifa(a, tarifa) - precioDeTarifa(b, tarifa));
+    // Lo agotado al final: se puede elegir, pero no se propone primero.
+    .sort((a, b) => Number(a.disponibilidad === "agotada") - Number(b.disponibilidad === "agotada")
+      || precioDeTarifa(a, tarifa) - precioDeTarifa(b, tarifa));
 }
 
 /** Precio de la tarifa; sin detal en esa planta, cae a la especial (igual que el servidor). */

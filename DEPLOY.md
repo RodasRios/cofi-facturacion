@@ -98,6 +98,42 @@ docker compose up --build -d
 Las migraciones se aplican solas al arrancar (`entrypoint.sh` corre `migrate`,
 nunca `makemigrations` — esas se generan en local y se commitean).
 
+## Avisos a planta por correo y WhatsApp
+
+WhatsApp no necesita configuración en el servidor: el botón abre WhatsApp Web
+(o la app) del propio usuario con el mensaje escrito, dirigido al número que
+tenga la planta en **Plantas y precios**. El mensaje lleva un link al PDF de la
+orden que la planta abre sin usuario; ese link usa `PUBLIC_URL` (por defecto
+`https://facturacion.cofilatam.com`).
+
+El correo sí lo manda el servidor, con el PDF adjunto. En el `.env` de la raíz:
+
+```bash
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=cuenta@gmail.com
+EMAIL_HOST_PASSWORD=contraseña-de-aplicación   # no la contraseña normal
+EMAIL_USE_TLS=True
+```
+
+Con Gmail: verificación en dos pasos activada y una "contraseña de aplicación"
+creada en https://myaccount.google.com/apppasswords. Si `cofi-gestor-insumos`
+ya tiene un correo configurado en su `.env`, se pueden copiar esos mismos
+valores. Luego `docker compose up -d --force-recreate backend`. Sin
+`EMAIL_HOST`, el botón "Correo" aparece deshabilitado.
+
+## Borrar los datos de prueba (reiniciar)
+
+Borra clientes, solicitudes, cotizaciones, pagos, órdenes, despachos y sus PDF.
+Conserva usuarios, firmas, plantas, materiales, precios y disponibilidad. Pide
+escribir `BORRAR` para confirmar. **No tiene vuelta atrás**: saca un respaldo antes.
+
+```bash
+cd ~/cofi-facturacion
+docker exec facturacion_postgres pg_dump -U facturacion_user facturacion | gzip > ~/facturacion-antes-de-reiniciar.sql.gz
+docker exec -it facturacion_backend python manage.py reiniciar_datos
+```
+
 ## Cambiar `DB_PASSWORD` cuando ya hay datos
 
 Postgres lee `POSTGRES_PASSWORD` **solo la primera vez**, cuando inicializa el

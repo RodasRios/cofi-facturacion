@@ -40,6 +40,15 @@ services:
       RUN_SEED: ${RUN_SEED:-true}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       COTIZACION_CONSECUTIVO_INICIAL: ${COTIZACION_CONSECUTIVO_INICIAL:-0}
+      # Links que van en WhatsApp/correo a las plantas (PDF de la orden).
+      PUBLIC_URL: ${PUBLIC_URL:-https://facturacion.cofilatam.com}
+      # Correo para avisar a las plantas. Sin EMAIL_HOST, el botón "Correo" queda deshabilitado.
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
     volumes:
       - facturacion_media:/app/media
     # El backend no se publica a internet: nginx del host solo habla con el

@@ -33,6 +33,12 @@ class User(models.Model):
     cargo = models.CharField(max_length=120, blank=True, null=True)
     telefono = models.CharField(max_length=40, blank=True, null=True)
     cedula = models.CharField(max_length=30, blank=True, null=True)
+    # Pestañas y acciones que puede usar (claves de api.permissions.PERMISOS).
+    # Un admin las tiene todas sin importar esta lista.
+    permisos = models.JSONField(default=list, blank=True)
+    # Si tiene plantas asignadas, solo ve y trabaja las órdenes, despachos y
+    # disponibilidad de esas plantas. Vacío = todas.
+    plantas = models.ManyToManyField("Planta", blank=True, related_name="usuarios")
     last_login = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -76,6 +82,12 @@ class Planta(models.Model):
     nombre = models.CharField(max_length=150, unique=True)
     ubicacion = models.CharField(max_length=250, blank=True, null=True)
     activa = models.BooleanField(default=True)
+    # A dónde se avisa cuando se le emite una orden de suministro.
+    whatsapp = models.CharField(max_length=30, blank=True, null=True)
+    email = models.EmailField(max_length=254, blank=True, null=True)
+    # Aviso general de la planta ("sin despacho el sábado", "báscula en mantenimiento").
+    nota_disponibilidad = models.CharField(max_length=300, blank=True, null=True)
+    nota_actualizada_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -119,6 +131,13 @@ TIPO_PRECIO_CHOICES = [
 IVA_PORCENTAJE = Decimal("19")
 
 
+DISPONIBILIDAD_CHOICES = [
+    ("disponible", "Disponible"),
+    ("limitada", "Poca disponibilidad"),
+    ("agotada", "Agotado"),
+]
+
+
 class MaterialPlanta(models.Model):
     """Precio de un material en una planta específica, **sin IVA**.
 
@@ -130,6 +149,15 @@ class MaterialPlanta(models.Model):
     planta = models.ForeignKey(Planta, on_delete=models.CASCADE, related_name="precios_material")
     precio_especial = models.DecimalField(max_digits=14, decimal_places=2)
     precio_detal = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    # Disponibilidad: la actualiza la gente de planta desde su pestaña, y se ve
+    # al cotizar para no ofrecer lo que no hay.
+    disponibilidad = models.CharField(max_length=20, choices=DISPONIBILIDAD_CHOICES, default="disponible")
+    cantidad_disponible = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    disponibilidad_nota = models.CharField(max_length=300, blank=True, null=True)
+    disponibilidad_actualizada_at = models.DateTimeField(null=True, blank=True)
+    disponibilidad_actualizada_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
 
     class Meta:
         db_table = "material_plantas"
@@ -361,14 +389,62 @@ class Cotizacion(models.Model):
                 out.append(p)
         return out
 
-    @property
-    def pago_vigente(self):
-        """El pago que sigue en juego, ignorando los rechazados.
+    # ── Pagos parciales ──────────────────────────────────────────────────
+    # Una cotización se puede pagar por partes y respaldar con una orden de
+    # compra del cliente. Nada de esto se guarda: sale de sumar los pagos.
 
-        Mismo caso que las cotizaciones: si financiera rechaza el comprobante,
-        el comercial sube otro sobre la misma cotización.
-        """
-        return next((p for p in self.pagos.all() if p.estado != "rechazado"), None)
+    def _suma_pagos(self, *estados):
+        return sum((p.monto for p in self.pagos.all() if p.estado in estados), Decimal("0"))
+
+    @property
+    def total_pagado(self) -> Decimal:
+        """Plata recibida y verificada por financiera."""
+        return self._suma_pagos("aprobado")
+
+    @property
+    def total_en_revision(self) -> Decimal:
+        """Comprobantes subidos que financiera aún no revisa."""
+        return self._suma_pagos("pendiente")
+
+    @property
+    def total_por_confirmar(self) -> Decimal:
+        """Respaldado por órdenes de compra del cliente, pendiente de pago real."""
+        return self._suma_pagos("por_confirmar")
+
+    @property
+    def saldo_por_cobrar(self) -> Decimal:
+        return max(self.total - self.total_pagado, Decimal("0"))
+
+    @property
+    def saldo_sin_registrar(self) -> Decimal:
+        """Lo que falta por cubrir con algún pago u orden de compra."""
+        cubierto = self._suma_pagos("aprobado", "pendiente", "por_confirmar")
+        return max(self.total - cubierto, Decimal("0"))
+
+    @property
+    def habilita_ordenes(self) -> bool:
+        """Se puede emitir orden de suministro con algo pagado o con orden de compra."""
+        return self.estado == "aprobada" and (self.total_pagado + self.total_por_confirmar) > 0
+
+    def cantidad_ordenada(self, item) -> Decimal:
+        return sum(
+            (oi.cantidad for o in self.ordenes_suministro.all() for oi in o.items.all()
+             if oi.cotizacion_item_id == item.id),
+            Decimal("0"),
+        )
+
+    @property
+    def fraccion_ordenada(self) -> Decimal:
+        """Qué parte del valor de materiales ya salió en órdenes (0 a 1)."""
+        base = self.subtotal_materiales
+        if not base:
+            return Decimal("0")
+        ordenado = sum(
+            (oi.cantidad * oi.cotizacion_item.precio_unitario
+             for o in self.ordenes_suministro.all() for oi in o.items.all()),
+            Decimal("0"),
+        )
+        return ordenado / base
 
 
 ORIGEN_PRECIO_CHOICES = TIPO_PRECIO_CHOICES + [("manual", "Precio escrito a mano")]
@@ -438,9 +514,17 @@ class CotizacionAjuste(models.Model):
 
 
 PAGO_ESTADO_CHOICES = [
-    ("pendiente", "Pendiente"),
+    ("pendiente", "Pendiente de revisión"),
+    ("por_confirmar", "Orden de compra por confirmar"),
     ("aprobado", "Aprobado"),
     ("rechazado", "Rechazado"),
+]
+
+PAGO_TIPO_CHOICES = [
+    ("transferencia", "Transferencia / consignación"),
+    # El cliente entrega su orden de compra: se compromete a pagar. Respalda el
+    # despacho, pero queda "por confirmar" hasta que entre la plata.
+    ("orden_compra", "Orden de compra del cliente"),
 ]
 
 
@@ -448,7 +532,12 @@ class Pago(models.Model):
     # FK y no 1:1, por lo mismo que Cotizacion.solicitud: un comprobante
     # rechazado por financiera no deja la cotización inservible.
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name="pagos")
+    tipo = models.CharField(max_length=20, choices=PAGO_TIPO_CHOICES, default="transferencia")
+    # Puede ser un abono: varios pagos suman hasta el total de la cotización.
     monto = models.DecimalField(max_digits=14, decimal_places=2)
+    referencia = models.CharField(max_length=100, blank=True, null=True)
+    fecha_pago = models.DateField(null=True, blank=True)
+    notas = models.TextField(blank=True, null=True)
     comprobante_path = models.CharField(max_length=500, blank=True, null=True)
     estado = models.CharField(max_length=20, choices=PAGO_ESTADO_CHOICES, default="pendiente")
     aprobado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="pagos_aprobados")
@@ -540,8 +629,15 @@ class OrdenSuministro(models.Model):
     # una orden por planta, porque cada planta despacha lo suyo por su cuenta.
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name="ordenes_suministro")
     planta = models.ForeignKey(Planta, on_delete=models.PROTECT, related_name="ordenes_suministro")
+    # Obra de esta entrega; si viene vacía se usa la de la solicitud.
+    obra = models.CharField(max_length=250, blank=True, null=True)
     notificada_planta = models.BooleanField(default=False)
     fecha_notificacion = models.DateTimeField(null=True, blank=True)
+    notificada_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    # "whatsapp", "email" — por dónde se avisó.
+    canales_notificacion = models.JSONField(default=list, blank=True)
+    # Para el link del PDF que va en el WhatsApp/correo: la planta lo abre sin usuario.
+    token_publico = models.CharField(max_length=64, unique=True, null=True, blank=True, default=_generar_token)
     # Se llenan después de emitida la orden, cuando el cliente confirma el
     # retiro: la planta solo deja entrar los vehículos cuyas placas figuran aquí.
     fecha_suministro = models.DateField(null=True, blank=True)
@@ -555,12 +651,38 @@ class OrdenSuministro(models.Model):
     class Meta:
         db_table = "ordenes_suministro"
         ordering = ["-created_at"]
-        # Una sola orden por cotización y planta — evita duplicarlas si el
-        # pago se aprobara dos veces.
-        unique_together = [["cotizacion", "planta"]]
 
     def __str__(self):
         return self.numero
+
+    @property
+    def obra_efectiva(self):
+        return self.obra or self.cotizacion.solicitud.obra
+
+    def cantidad_despachada(self, material_id) -> Decimal:
+        return sum(
+            (di.cantidad for d in self.despachos.all() for di in d.items.all() if di.material_id == material_id),
+            Decimal("0"),
+        )
+
+    @property
+    def completamente_despachada(self) -> bool:
+        items = list(self.items.all())
+        return bool(items) and all(self.cantidad_despachada(i.cotizacion_item.material_id) >= i.cantidad for i in items)
+
+
+class OrdenSuministroItem(models.Model):
+    """Cuánto de una línea de la cotización se entrega con esta orden.
+
+    Las órdenes pueden ser parciales: 100 m³ cotizados pueden salir en dos
+    órdenes de 60 y 40, cada una con su fecha y sus placas.
+    """
+    orden = models.ForeignKey(OrdenSuministro, on_delete=models.CASCADE, related_name="items")
+    cotizacion_item = models.ForeignKey("CotizacionItem", on_delete=models.PROTECT, related_name="ordenes_items")
+    cantidad = models.DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        db_table = "orden_suministro_items"
 
 
 class Despacho(models.Model):
@@ -576,6 +698,8 @@ class Despacho(models.Model):
     placa_vehiculo = models.CharField(max_length=20, blank=True, null=True)
     notas = models.TextField(blank=True, null=True)
     pdf_path = models.CharField(max_length=500, blank=True, null=True)
+    # Foto o PDF del tiquete/remisión firmado que sube la planta.
+    soporte_path = models.CharField(max_length=500, blank=True, null=True)
     creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="despachos_creados")
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -125,3 +125,23 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+# Correo — para avisar a las plantas cuando se les emite una orden de suministro.
+# Sin EMAIL_HOST, el botón "Correo" responde que no está configurado (y en
+# desarrollo los correos salen por consola).
+if os.environ.get("EMAIL_HOST"):
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = os.environ.get("EMAIL_HOST")
+    EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+    EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+    EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+    EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+    EMAIL_CONFIGURADO = True
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    EMAIL_CONFIGURADO = False
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL") or os.environ.get("EMAIL_HOST_USER") or "no-reply@cofilatam.com"
+
+# Dirección pública de la app, para los links que van en WhatsApp y correo
+# (p. ej. https://facturacion.cofilatam.com). Vacía = se deduce de la petición.
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
