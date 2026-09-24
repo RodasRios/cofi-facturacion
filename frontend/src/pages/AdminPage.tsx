@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getPlantas, createPlanta, setPlantaActiva } from "../api/plantas";
-import { getMateriales, createMaterial, setPrecioMaterial } from "../api/materiales";
+import { getMateriales, createMaterial } from "../api/materiales";
 import { Icon } from "../components/ui/Icon";
 import { UsuariosAdmin } from "../components/UsuariosAdmin";
 import { MiFirma } from "../components/MiFirma";
+import { PreciosPorPlanta } from "../components/PreciosPorPlanta";
 import type { MaterialTipo } from "../types";
 
 export function AdminPage() {
@@ -39,14 +40,10 @@ export function AdminPage() {
     onError: () => toast.error("No se pudo crear el material"),
   });
 
-  const precioMut = useMutation({
-    mutationFn: ({ materialId, plantaId, campo, valor }: {
-      materialId: number; plantaId: number;
-      campo: "precio_especial" | "precio_detal"; valor: number | null;
-    }) => setPrecioMaterial(materialId, plantaId, { [campo]: valor }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["materiales"] }); toast.success("Precio actualizado"); },
-    onError: () => toast.error("No se pudo actualizar el precio"),
-  });
+  // Las plantas dadas de baja se esconden: solo sirven para reactivarlas.
+  const [verInactivas, setVerInactivas] = useState(false);
+  const inactivas = (plantas ?? []).filter(p => !p.activa).length;
+  const plantasVisibles = (plantas ?? []).filter(p => verInactivas || p.activa);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -68,7 +65,7 @@ export function AdminPage() {
         <table className="table-sharp">
           <thead><tr><th>Nombre</th><th>Ubicación</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            {plantas?.map(p => (
+            {plantasVisibles.map(p => (
               <tr key={p.id} style={p.activa ? undefined : { opacity: 0.55 }}>
                 <td>{p.nombre}</td>
                 <td>{p.ubicacion || "-"}</td>
@@ -90,10 +87,27 @@ export function AdminPage() {
             ))}
           </tbody>
         </table>
+        {inactivas > 0 && (
+          <button className="btn-ghost" style={{ marginTop: 8, fontSize: 12 }} onClick={() => setVerInactivas(v => !v)}>
+            <Icon name={verInactivas ? "visibility_off" : "visibility"} size={14} />
+            {verInactivas ? "Ocultar plantas inactivas" : `Mostrar plantas inactivas (${inactivas})`}
+          </button>
+        )}
       </section>
 
       <section className="card" style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 12px" }}>Materiales</h2>
+        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 4px" }}>Precios por planta</h2>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
+          Al cotizar solo se ofrecen las plantas que tienen precio para cada material.
+        </p>
+        <PreciosPorPlanta plantas={plantas ?? []} materiales={materiales ?? []} />
+      </section>
+
+      <section className="card" style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 4px" }}>Catálogo de materiales</h2>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
+          {materiales?.length ?? 0} materiales. Después de crear uno, asígnale precio en la planta que lo vende.
+        </p>
         <form
           style={{ display: "flex", gap: 8, marginBottom: 14 }}
           onSubmit={(e) => { e.preventDefault(); crearMaterialMut.mutate(); }}
@@ -108,73 +122,6 @@ export function AdminPage() {
           <button type="submit" className="btn-primary"><Icon name="add" size={16} />Agregar</button>
         </form>
 
-        <table className="table-sharp">
-          <thead>
-            <tr>
-              <th>Material</th>
-              <th>Tipo</th>
-              <th>Unidad</th>
-              {plantas?.map(p => (
-                <th key={p.id}>
-                  {p.nombre}
-                  <span style={{ display: "block", fontWeight: 400, fontSize: 10, opacity: 0.7 }}>
-                    especial · detal
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {materiales?.map(m => (
-              <tr key={m.id}>
-                <td>{m.nombre}</td>
-                <td>{m.tipo_display}</td>
-                <td>{m.unidad_medida}</td>
-                {plantas?.map(p => {
-                  const precio = m.precios.find(pr => pr.planta === p.id);
-                  // Dos casillas por planta: venta especial y venta detal.
-                  const casilla = (
-                    campo: "precio_especial" | "precio_detal",
-                    actual: string | null | undefined,
-                    titulo: string,
-                  ) => (
-                    <input
-                      className="input-base"
-                      style={{ width: 84 }}
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      title={titulo}
-                      defaultValue={actual ?? ""}
-                      placeholder="—"
-                      onBlur={e => {
-                        const txt = e.target.value.trim();
-                        const val = txt === "" ? null : Number(txt);
-                        if (val !== null && !(val > 0)) return;
-                        const previo = actual == null ? null : Number(actual);
-                        if (val === previo) return;
-                        // El precio especial es obligatorio: no se puede vaciar.
-                        if (campo === "precio_especial" && val === null) {
-                          e.target.value = actual ?? "";
-                          return;
-                        }
-                        precioMut.mutate({ materialId: m.id, plantaId: p.id, campo, valor: val });
-                      }}
-                    />
-                  );
-                  return (
-                    <td key={p.id}>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {casilla("precio_especial", precio?.precio_especial, "Venta especial (sin IVA)")}
-                        {casilla("precio_detal", precio?.precio_detal, "Venta detal (sin IVA) — vacío usa la especial")}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </section>
     </div>
   );

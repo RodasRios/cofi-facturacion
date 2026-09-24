@@ -282,7 +282,14 @@ def generate_vinculacion(
 # dirección de la empresa, en tamaño carta como los originales.
 # ═══════════════════════════════════════════════════════════════════════════
 
+from services.notas_cotizacion import elegidas  # noqa: E402
+
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo_tyc.png"
+
+
+def _escapar(texto: str) -> str:
+    """Texto escrito por un usuario: los < y & romperían el marcado de ReportLab."""
+    return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 EMPRESA_CIUDAD = "Cartago, Valle del Cauca"
 EMPRESA_DIRECCION = "Carrera 4 No. 54-75 Cartago – Valle del Cauca"
@@ -421,14 +428,14 @@ def _bloque_firma(firmante: dict) -> list:
             elementos.append(Spacer(1, 1.6 * cm))
     else:
         elementos.append(Spacer(1, 1.6 * cm))
-    elementos.append(_p(f"<b>{(firmante.get('nombre') or '').upper()}</b>", size=11, align=TA_LEFT))
+    elementos.append(_p(f"<b>{_escapar((firmante.get('nombre') or '').upper())}</b>", size=11, align=TA_LEFT))
     if firmante.get("cargo"):
-        elementos.append(_p(firmante["cargo"], size=11, align=TA_LEFT))
+        elementos.append(_p(_escapar(firmante["cargo"]), size=11, align=TA_LEFT))
     if firmante.get("telefono"):
-        elementos.append(_p(f"Cel.: {firmante['telefono']}", size=11, align=TA_LEFT))
+        elementos.append(_p(f"Cel.: {_escapar(firmante['telefono'])}", size=11, align=TA_LEFT))
     correo = firmante.get("email") or EMPRESA_EMAIL
     elementos.append(_p(
-        f'Correo: <font color="#1a0dab"><u>{correo}</u></font>', size=11, align=TA_LEFT))
+        f'Correo: <font color="#1a0dab"><u>{_escapar(correo)}</u></font>', size=11, align=TA_LEFT))
     return elementos
 
 
@@ -444,48 +451,7 @@ _COT_INTRO = (
     "metálicas y, por otra parte, “Prefabricados” para el mercado de la construcción y la industria."
 )
 
-_COT_NOTAS = [
-    "Los materiales pétreos suministrados por Triturados y Concretos Ltda. son producidos bajo "
-    "los estándares de calidad establecidos por el Instituto Nacional de Vías – INVIAS y cumplen "
-    "con las especificaciones técnicas exigidas por dicha entidad.",
-    "El valor de los materiales pétreos fue calculado con base en los precios vigentes a la fecha "
-    "de la cotización y considerando despachos en jornada diurna. Cualquier variación en los costos "
-    "de insumos, combustibles o condiciones operativas, así como requerimientos de despacho en "
-    "jornada nocturna, podrá generar ajustes en los valores cotizados, previa validación por parte "
-    "de Triturados y Concretos Ltda.",
-    "La presente oferta no contempla deducciones propias del sector público. Los valores cotizados "
-    "fueron estructurados considerando únicamente los descuentos de ley de carácter general, tales "
-    "como la retención en la fuente por concepto de compras. Cualquier deducción adicional que "
-    "aplique según la naturaleza del contratante deberá ser asumida por el cliente o ajustada en la "
-    "facturación correspondiente.",
-    "El valor del material incluye el cargue en la volqueta en planta. El transporte será "
-    "responsabilidad del cliente, salvo acuerdo expreso en contrario.",
-    "El pedido de material deberá programarse con una anticipación mínima de ocho (8) días "
-    "calendario y el despacho se realizará siempre y cuando la planta se encuentre habilitada para "
-    "labores operativas.",
-    "Los tiempos de cargue podrán variar de acuerdo con la demanda y las condiciones operativas de la planta.",
-    "Se recomienda al cliente verificar el cubicaje de la volqueta en planta y retirar muestra del "
-    "material para la realización de los ensayos correspondientes.",
-    "Triturados y Concretos Ltda. no se hace responsable por daños, pérdidas o alteraciones del "
-    "material una vez este haya sido cargado en la volqueta y haya salido de planta.",
-    "El retiro del material deberá efectuarse dentro de los cuatro (4) meses siguientes a la fecha "
-    "de pago. Vencido dicho plazo, el material pendiente de despacho quedará sujeto a los precios y "
-    "condiciones vigentes al momento del retiro.",
-]
 
-_COT_NOTAS_FINALES = [
-    "<b>HORARIO DE PLANTA:</b> El horario de despacho de la planta es de lunes a jueves de 7am a "
-    "3:30 pm, viernes de 7 am a 2:30 pm, sábados de 7 am a 10:30 am, domingos y festivos no hay "
-    "servicio de despacho.",
-    "La documentación ambiental y de calidad será entregada una vez exista un acuerdo comercial formalizado.",
-    "Una vez realizado el pago, Triturados y Concretos Ltda. no realizará devoluciones de dinero por "
-    "saldos a favor. Dichos saldos serán reconocidos mediante la entrega de materiales, de forma "
-    "proporcional al valor pendiente de compensar.",
-    "Se recomienda verificar el cubicaje de la volqueta en planta con el fin de evitar diferencias "
-    "en las cantidades de material entregadas.",
-    "Los precios aquí estipulados podrán presentar variaciones en función de las condiciones del "
-    "mercado, costos de insumos y condiciones operativas, sin previo aviso.",
-]
 
 _COT_OBSERVACIONES = [
     "La presente cotización es de carácter informativo y no constituye una obligación ni promesa de "
@@ -529,7 +495,8 @@ def _viñeta(texto: str, marca: str = "•") -> Paragraph:
     ), bulletText=marca)
 
 
-def _tabla_cotizacion(grupos: list[dict], subtotal, iva, iva_pct, total, anio: int) -> Table:
+def _tabla_cotizacion(grupos: list[dict], subtotal, iva, iva_pct, total, anio: int,
+                      subtotal_materiales=None, ajustes=None) -> Table:
     """Una sección por planta (SUMINISTRO DE PLANTA X 2026) y totales al final."""
     anchos = [1.1 * cm, 7.0 * cm, 1.7 * cm, 1.8 * cm, 3.0 * cm, 2.6 * cm]
     fila_style = ParagraphStyle("c", fontName="Helvetica", fontSize=8, leading=9.5)
@@ -546,7 +513,7 @@ def _tabla_cotizacion(grupos: list[dict], subtotal, iva, iva_pct, total, anio: i
                    ("LINEABOVE", (0, r + 1), (-1, r + 1), 1.2, BORDE)]
         for it in g["items"]:
             datos.append([
-                str(item), Paragraph(it["descripcion"].upper(), fila_style),
+                str(item), Paragraph(_escapar(it["descripcion"].upper()), fila_style),
                 (it["unidad"] or "").upper(), _cantidad(it["cantidad"]),
                 f"$ {_cop(it['precio'])}",
                 f"$ {_cop(it['subtotal'])}",
@@ -557,17 +524,28 @@ def _tabla_cotizacion(grupos: list[dict], subtotal, iva, iva_pct, total, anio: i
                        ("ALIGN", (4, fila), (5, fila), "RIGHT")]
             item += 1
 
+    # Pie de totales. Con cargos o descuentos, se muestra primero lo de
+    # materiales y cada ajuste antes del subtotal, para que cuadre a la vista.
+    pie = []
+    if ajustes:
+        pie.append(("SUBTOTAL MATERIALES", subtotal_materiales))
+        for aj in ajustes:
+            pie.append((aj["descripcion"].upper(), aj["valor"]))
+    pie += [("SUBTOTAL", subtotal), ("IVA", iva), ("TOTAL", total)]
+
     r = len(datos)
-    for etiqueta, valor, negrilla in (
-        ("SUBTOTAL", subtotal, False), (f"IVA", iva, False), ("TOTAL", total, True),
-    ):
-        datos.append(["", "", "", "", etiqueta, f"$ {_cop(valor)}"])
+    for etiqueta, valor in pie:
+        signo = "-" if Decimal(str(valor)) < 0 else ""
+        datos.append(["", "", etiqueta, "", "", f"{signo}$ {_cop(abs(Decimal(str(valor))))}"])
+    fin = len(datos) - 1
     estilo += [
-        ("SPAN", (0, r), (3, r + 2)),
-        ("FONTNAME", (4, r), (4, r + 2), "Helvetica-Bold"),
-        ("FONTNAME", (5, r + 2), (5, r + 2), "Helvetica-Bold"),
-        ("ALIGN", (5, r), (5, r + 2), "RIGHT"),
+        ("SPAN", (0, r), (1, fin)),
+        ("FONTNAME", (2, r), (4, fin), "Helvetica-Bold"),
+        ("FONTNAME", (5, fin), (5, fin), "Helvetica-Bold"),
+        ("ALIGN", (5, r), (5, fin), "RIGHT"),
     ]
+    for fila in range(r, fin + 1):
+        estilo.append(("SPAN", (2, fila), (4, fila)))
 
     t = Table(datos, colWidths=anchos, repeatRows=0)
     t.setStyle(TableStyle([
@@ -604,14 +582,14 @@ def generate_cotizacion(path: Path, datos: dict) -> None:
            size=8.5, align=TA_CENTER),
         Spacer(1, 14),
         _p("<b>Señores:</b>", size=12, align=TA_LEFT),
-        _p(f"<b>{(cli.get('nombre') or '').upper()}</b>", size=12, align=TA_LEFT, leading=17),
+        _p(f"<b>{_escapar((cli.get('nombre') or '').upper())}</b>", size=12, align=TA_LEFT, leading=17),
     ]
     if cli.get("nit"):
-        e.append(_p(f"<b>NIT:</b> {cli['nit']}", size=12, align=TA_LEFT, leading=17))
+        e.append(_p(f"<b>NIT:</b> {_escapar(cli['nit'])}", size=12, align=TA_LEFT, leading=17))
     if cli.get("telefono"):
-        e.append(_p(f"<b>Teléfono:</b> {cli['telefono']}", size=12, align=TA_LEFT, leading=17))
+        e.append(_p(f"<b>Teléfono:</b> {_escapar(cli['telefono'])}", size=12, align=TA_LEFT, leading=17))
     if cli.get("email"):
-        e.append(_p(f'<b>Correo electrónico:</b> <font color="#1a0dab"><u>{cli["email"]}</u></font>',
+        e.append(_p(f'<b>Correo electrónico:</b> <font color="#1a0dab"><u>{_escapar(cli["email"])}</u></font>',
                     size=12, align=TA_LEFT, leading=17))
     e += [
         Spacer(1, 14),
@@ -623,7 +601,9 @@ def generate_cotizacion(path: Path, datos: dict) -> None:
            "permito presentar la propuesta económica de los materiales requeridos:", size=11.5, leading=16),
         Spacer(1, 16),
         _tabla_cotizacion(datos["grupos"], datos["subtotal"], datos["iva"],
-                          datos["iva_porcentaje"], datos["total"], fecha.year),
+                          datos["iva_porcentaje"], datos["total"], fecha.year,
+                          subtotal_materiales=datos.get("subtotal_materiales"),
+                          ajustes=datos.get("ajustes")),
         Spacer(1, 16),
         _p("<b>Validez de la oferta:</b> 15 días.", align=TA_LEFT),
         _p("<b>Forma de pago:</b> Anticipado.", align=TA_LEFT),
@@ -631,16 +611,19 @@ def generate_cotizacion(path: Path, datos: dict) -> None:
         _p("<b>NOTAS ACLARATORIAS:</b>", align=TA_LEFT),
         Spacer(1, 4),
     ]
-    e += [_viñeta(n) for n in _COT_NOTAS]
+    notas = elegidas(datos.get("notas_aclaratorias"))
+    e += [_viñeta(n["texto"]) for n in notas if n["posicion"] == "antes"]
 
     for nombre, ubicacion in datos.get("plantas", []):
         texto = f"<b>UBICACIÓN DE LA PLANTA:</b> El suministro se contempla en la {nombre}"
         texto += f", ubicada en {ubicacion}." if ubicacion else "."
         e.append(_viñeta(texto))
 
-    e += [_viñeta(n) for n in _COT_NOTAS_FINALES]
-    if datos.get("notas"):
-        e.append(_viñeta(f"<b>NOTA:</b> {datos['notas']}"))
+    e += [_viñeta(n["texto"]) for n in notas if n["posicion"] == "despues"]
+    # Notas extra del comercial: una viñeta por línea escrita.
+    for linea in (datos.get("notas") or "").splitlines():
+        if linea.strip():
+            e.append(_viñeta(_escapar(linea.strip())))
 
     e += [Spacer(1, 12), _p("<b>Observaciones.</b>", align=TA_LEFT), Spacer(1, 4)]
     for texto in _COT_OBSERVACIONES:

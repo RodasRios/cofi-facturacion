@@ -691,3 +691,93 @@ class DatosDeEjemploTest(TestCase):
         self.assertTrue(Planta.objects.get(nombre="Planta Corinto").activa)
         self.assertFalse(Material.objects.get(nombre="Recebo").activo)
         self.assertTrue(Material.objects.get(nombre="Piedra filtro").activo)
+
+
+@override_settings(GENERATED_PDF_DIR=_TMP_PDFS)
+class CotizacionControlTest(TestCase):
+    """Precio por línea, planta sin precio, cargos/descuentos y notas elegidas."""
+
+    def setUp(self):
+        self.comercial = User(username="com", rol="comercial", is_admin=True)
+        self.comercial.set_password("x")
+        self.comercial.save()
+        self.con_precio = Planta.objects.create(nombre="Planta Con Precio")
+        self.sin_precio = Planta.objects.create(nombre="Planta Sin Precio")
+        self.material = Material.objects.create(nombre="Piedra filtro", unidad_medida="m3")
+        MaterialPlanta.objects.create(material=self.material, planta=self.con_precio,
+                                      precio_especial=Decimal("44000"), precio_detal=Decimal("54000"))
+        cliente = Cliente.objects.create(nombre="Cliente", numero_vinculacion="VIN-0001")
+        self.solicitud = SolicitudCotizacion.objects.create(numero="SC-0001", cliente=cliente,
+                                                            creado_por=self.comercial)
+        SolicitudCotizacionItem.objects.create(solicitud=self.solicitud, material=self.material, cantidad=100)
+        self.api = APIClient()
+        r = self.api.post("/api/v1/auth/login", {"username": "com", "password": "x"}, format="json")
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def _cotizar(self, **extra):
+        cuerpo = {"solicitud": self.solicitud.id, "planta": self.con_precio.id,
+                  "items": [{"material": self.material.id, "planta": self.con_precio.id, "cantidad": 100}]}
+        cuerpo.update(extra)
+        return self.api.post("/api/v1/cotizaciones/", cuerpo, format="json")
+
+    def test_planta_sin_precio_se_rechaza_y_no_crea_nada(self):
+        r = self._cotizar(items=[{"material": self.material.id, "planta": self.sin_precio.id, "cantidad": 100}])
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("no tiene precio", r.json()["detail"])
+        self.assertEqual(Cotizacion.objects.count(), 0)
+
+    def test_precio_por_linea_especial_detal_o_manual(self):
+        r = self._cotizar(items=[
+            {"material": self.material.id, "planta": self.con_precio.id, "cantidad": 10, "origen_precio": "detal"},
+            {"material": self.material.id, "planta": self.con_precio.id, "cantidad": 10,
+             "origen_precio": "especial", "precio_unitario": 1},  # el precio del navegador se ignora
+            {"material": self.material.id, "planta": self.sin_precio.id, "cantidad": 10,
+             "origen_precio": "manual", "precio_unitario": 50000},
+        ])
+        self.assertEqual(r.status_code, 201, r.content)
+        precios = [(i["origen_precio"], Decimal(i["precio_unitario"])) for i in r.json()["items"]]
+        self.assertEqual(precios, [("detal", Decimal("54000.00")), ("especial", Decimal("44000.00")),
+                                   ("manual", Decimal("50000.00"))])
+
+    def test_manual_sin_precio_se_rechaza(self):
+        r = self._cotizar(items=[{"material": self.material.id, "planta": self.con_precio.id,
+                                  "cantidad": 10, "origen_precio": "manual"}])
+        self.assertEqual(r.status_code, 400)
+
+    def test_cargos_y_descuentos(self):
+        r = self._cotizar(ajustes=[
+            {"tipo": "descuento", "modo": "porcentaje", "descripcion": "Descuento comercial", "valor": 10},
+            {"tipo": "cargo", "modo": "monto", "descripcion": "Flete", "valor": 200000, "aplica_iva": False},
+        ])
+        self.assertEqual(r.status_code, 201, r.content)
+        c = r.json()
+        # 100 × 44.000 = 4.400.000; −10% = −440.000; + flete 200.000 sin IVA
+        self.assertEqual(Decimal(c["subtotal_materiales"]), Decimal("4400000.00"))
+        self.assertEqual(Decimal(c["subtotal"]), Decimal("4160000.00"))
+        # IVA solo sobre lo gravado: (4.400.000 − 440.000) × 19% = 752.400
+        self.assertEqual(Decimal(c["iva"]), Decimal("752400.00"))
+        self.assertEqual(Decimal(c["total"]), Decimal("4912400.00"))
+        self.assertEqual([Decimal(a["valor_calculado"]) for a in c["ajustes"]],
+                         [Decimal("-440000.00"), Decimal("200000.00")])
+
+    def test_ajuste_invalido_no_crea_nada(self):
+        r = self._cotizar(ajustes=[{"tipo": "descuento", "modo": "porcentaje", "descripcion": "X", "valor": 150}])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Cotizacion.objects.count(), 0)
+
+    def test_notas_aclaratorias_elegidas(self):
+        catalogo = self.api.get("/api/v1/cotizaciones/notas-aclaratorias/").json()
+        self.assertTrue(all({"clave", "titulo", "texto"} <= set(n) for n in catalogo))
+
+        r = self._cotizar(notas_aclaratorias=["horario", "clave_inventada"], notas="Entrega en obra\nPago 50/50")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["notas_aclaratorias"], ["horario"])
+
+        from services.notas_cotizacion import elegidas
+        self.assertEqual([n["clave"] for n in elegidas(["horario"])], ["horario"])
+        self.assertEqual(len(elegidas(None)), len(catalogo))
+
+    def test_quitar_precio_de_una_planta(self):
+        r = self.api.delete(f"/api/v1/materiales/{self.material.id}/precios/?planta={self.con_precio.id}")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertFalse(MaterialPlanta.objects.filter(planta=self.con_precio).exists())

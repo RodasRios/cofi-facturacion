@@ -33,7 +33,7 @@ export function MiFirma({ compacto = false }: { compacto?: boolean }) {
   return (
     <div className={`mi-firma ${compacto ? "compacto" : ""} ${tiene ? "ok" : "falta"}`}>
       <Icon name={tiene ? "check_circle" : "draw"} size={16} />
-      <span>
+      <span className="mi-firma-texto">
         {tiene
           ? "Tu firma está cargada y sale en tus cotizaciones."
           : "Sube tu firma para que salga en las cotizaciones que armes (PNG con fondo transparente, idealmente)."}
@@ -49,7 +49,8 @@ export function MiFirma({ compacto = false }: { compacto?: boolean }) {
           display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
           padding: 10px 12px; margin-bottom: 14px; font-size: 12.5px; border: 1px solid;
         }
-        .mi-firma span { flex: 1 1 240px; }
+        .mi-firma-texto { flex: 1 1 240px; }
+        .mi-firma .btn-secondary { white-space: nowrap; }
         .mi-firma.falta { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
         .dark .mi-firma.falta { background: #2a1f05; border-color: #78580c; color: #fbbf24; }
         .mi-firma.ok { background: var(--bg-surface); border-color: var(--border); color: var(--text-secondary); }

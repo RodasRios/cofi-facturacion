@@ -137,10 +137,30 @@ distintos cobra lo correcto en cada una.
   con solo sus ítems, su `numero` y su PDF — porque cada planta despacha por
   su cuenta. `unique_together (cotizacion, planta)` impide duplicarlas.
 - El porcentaje del reparto **no se guarda**: se calcula desde las cantidades
-  (`frontend/src/lib/reparto.ts`). Guardarlo sería un dato que puede quedar
+  (`frontend/src/lib/cotizacion.ts`). Guardarlo sería un dato que puede quedar
   en contra de las cantidades.
 - El frontend exige que el reparto de cada material sume exactamente lo pedido
   antes de dejar generar la cotización.
+
+### Armado de la cotización (`components/NuevaCotizacion.tsx`)
+
+- **Precio por línea** (`CotizacionItem.origen_precio`): `especial` o `detal`
+  toma la tarifa de SU planta — el servidor la pone e **ignora el precio que
+  mande el navegador** — y `manual` usa el `precio_unitario` enviado. El
+  aprobador ve el distintivo "precio manual" en la lista.
+- **Una planta sin precio para el material no se puede elegir**: el formulario
+  no la ofrece y `_validar_lineas()` responde 400. Antes caía a $0 en silencio y
+  salían cotizaciones sin valores. Todo se valida antes de crear nada.
+- **Cargos y descuentos** (`CotizacionAjuste`): monto fijo o porcentaje; el
+  porcentaje es sobre el subtotal de materiales (no sobre otros ajustes, así el
+  orden no importa). `aplica_iva` por ajuste: un flete puede ir sin IVA.
+  `Cotizacion.subtotal` = materiales + ajustes; `iva` = solo sobre lo gravado.
+  `lib/cotizacion.ts::calcularTotales` replica ese cálculo para la vista previa
+  — si cambia en el modelo, cambia allá también.
+- **Notas aclaratorias**: catálogo en `services/notas_cotizacion.py` (clave,
+  título, texto). `Cotizacion.notas_aclaratorias` guarda las claves elegidas
+  (`None` = todas, que es como quedan las cotizaciones anteriores). `notas`
+  guarda las notas extra, una viñeta por línea.
 
 ### Link de pedidos (`SolicitudToken`)
 

@@ -5,10 +5,13 @@ from django.http import FileResponse
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from decimal import Decimal, InvalidOperation
+from django.db import transaction
 from api.models import (
-    Cotizacion, CotizacionItem, SolicitudCotizacion, Planta, Material, MaterialPlanta,
-    Seguimiento,
+    Cotizacion, CotizacionItem, CotizacionAjuste, SolicitudCotizacion, Planta, Material,
+    MaterialPlanta, Seguimiento,
 )
+from services.notas_cotizacion import NOTAS_ACLARATORIAS, CLAVES as CLAVES_NOTAS
 from api.serializers import CotizacionSerializer
 from api.permissions import IsAprobador
 from services.pdf_service import generate_cotizacion
@@ -27,6 +30,13 @@ def _numero_cotizacion():
     anio = timezone.localdate().year
     del_anio = Cotizacion.objects.filter(numero__endswith=f"-{anio}").count()
     return f"{settings.COTIZACION_CONSECUTIVO_INICIAL + del_anio + 1}-{anio}"
+
+
+def _etiqueta_ajuste(ajuste):
+    """"Descuento comercial (5%)" / "Flete" — el % se ve en el documento."""
+    if ajuste.modo == "porcentaje":
+        return f"{ajuste.descripcion} ({ajuste.valor.normalize():f}%)"
+    return ajuste.descripcion
 
 
 def _datos_pdf(cotizacion):
@@ -56,6 +66,12 @@ def _datos_pdf(cotizacion):
             "telefono": cliente.telefono, "email": cliente.email,
         },
         "grupos": grupos,
+        "subtotal_materiales": cotizacion.subtotal_materiales,
+        "ajustes": [
+            {"descripcion": _etiqueta_ajuste(aj), "valor": valor}
+            for aj, valor in cotizacion.ajustes_calculados
+        ],
+        "notas_aclaratorias": cotizacion.notas_aclaratorias,
         "subtotal": cotizacion.subtotal,
         "iva": cotizacion.iva,
         "iva_porcentaje": cotizacion.iva_porcentaje,
@@ -83,9 +99,100 @@ def _generar_pdf(cotizacion):
         logger.error("Error generando PDF cotización %s: %s", cotizacion.numero, e)
 
 
+def _validar_lineas(items, planta_defecto, tipo_precio):
+    """Líneas listas para crear, con su precio resuelto. Lanza ValueError.
+
+    Cada línea elige de dónde sale su precio (`origen_precio`): la tarifa
+    especial o detal de SU planta, o uno escrito a mano. Con tarifa, la planta
+    TIENE que tener precio para ese material: antes caía a $0 en silencio y
+    salían cotizaciones sin valores.
+    """
+    lineas = []
+    for it in items:
+        material = Material.objects.filter(id=it.get("material")).first()
+        if not material:
+            raise ValueError("Uno de los materiales no existe.")
+        planta = planta_defecto
+        if it.get("planta"):
+            planta = Planta.objects.filter(id=it["planta"]).first()
+            if not planta:
+                raise ValueError(f"La planta {it['planta']} no existe.")
+        try:
+            cantidad = Decimal(str(it.get("cantidad") or 0))
+        except InvalidOperation:
+            raise ValueError(f"La cantidad de {material.nombre} no es un número.")
+        if cantidad <= 0:
+            raise ValueError(f"La cantidad de {material.nombre} debe ser mayor que cero.")
+
+        origen = it.get("origen_precio") or tipo_precio
+        if origen == "manual":
+            try:
+                precio = Decimal(str(it.get("precio_unitario")))
+            except (InvalidOperation, TypeError):
+                raise ValueError(f"Escribe el precio de {material.nombre} en {planta.nombre}.")
+            if precio <= 0:
+                raise ValueError(f"El precio de {material.nombre} debe ser mayor que cero.")
+        elif origen in ("especial", "detal"):
+            mp = MaterialPlanta.objects.filter(material=material, planta=planta).first()
+            if not mp:
+                raise ValueError(
+                    f"{planta.nombre} no tiene precio para {material.nombre}. "
+                    "Elige otra planta o escribe el precio a mano."
+                )
+            # El precio de tarifa lo pone el servidor: el que mande el navegador
+            # se ignora, para que "especial" siempre sea el de la lista.
+            precio = mp.precio(origen)
+            # Sin tarifa detal en esa planta, precio() cae a la especial.
+            if origen == "detal" and mp.precio_detal is None:
+                origen = "especial"
+        else:
+            raise ValueError(f"Origen de precio desconocido: {origen}.")
+
+        lineas.append({
+            "material": material, "planta": planta, "cantidad": cantidad,
+            "precio_unitario": precio, "origen_precio": origen,
+        })
+    return lineas
+
+
+def _validar_ajustes(ajustes):
+    """Cargos (flete…) y descuentos, validados. Lanza ValueError."""
+    limpios = []
+    for aj in ajustes:
+        tipo, modo = aj.get("tipo"), aj.get("modo")
+        descripcion = str(aj.get("descripcion") or "").strip()
+        if tipo not in ("cargo", "descuento") or modo not in ("monto", "porcentaje"):
+            raise ValueError("Ajuste inválido.")
+        if not descripcion:
+            raise ValueError("Cada cargo o descuento necesita una descripción.")
+        try:
+            valor = Decimal(str(aj.get("valor")))
+        except (InvalidOperation, TypeError):
+            raise ValueError(f"El valor de '{descripcion}' no es un número.")
+        if valor <= 0:
+            raise ValueError(f"El valor de '{descripcion}' debe ser mayor que cero.")
+        if modo == "porcentaje" and valor > 100:
+            raise ValueError(f"'{descripcion}' no puede superar el 100%.")
+        limpios.append({
+            "tipo": tipo, "modo": modo, "descripcion": descripcion[:200], "valor": valor,
+            "aplica_iva": bool(aj.get("aplica_iva", True)),
+        })
+    return limpios
+
+
+class NotasAclaratoriasView(APIView):
+    """Catálogo de notas aclaratorias para las casillas de la cotización."""
+
+    def get(self, request):
+        return Response(NOTAS_ACLARATORIAS)
+
+
 class CotizacionListCreateView(APIView):
     def get(self, request):
-        cotizaciones = Cotizacion.objects.select_related("solicitud__cliente", "planta").prefetch_related("items")
+        cotizaciones = (
+            Cotizacion.objects.select_related("solicitud__cliente", "planta", "creado_por")
+            .prefetch_related("items__material", "items__planta", "ajustes", "pagos", "ordenes_suministro")
+        )
         estado = request.query_params.get("estado")
         if estado:
             cotizaciones = cotizaciones.filter(estado=estado)
@@ -120,32 +227,28 @@ class CotizacionListCreateView(APIView):
         # La tarifa viene del cliente, salvo que se pida otra explícitamente.
         tipo_precio = d.get("tipo_precio") or solicitud.cliente.tipo_precio
 
-        cotizacion = Cotizacion.objects.create(
-            numero=_numero_cotizacion(), solicitud=solicitud, planta=planta,
-            tipo_precio=tipo_precio, notas=d.get("notas"), creado_por=request.user,
-        )
-        for it in items:
-            material = Material.objects.filter(id=it.get("material")).first()
-            if not material:
-                continue
-            # Cada línea puede salir de una planta distinta; sin "planta" en el
-            # ítem se usa la de la cotización (comportamiento de siempre).
-            planta_item = planta
-            if it.get("planta"):
-                p = Planta.objects.filter(id=it["planta"]).first()
-                if not p:
-                    return Response({"detail": f"Planta {it['planta']} no encontrada"}, status=404)
-                planta_item = p
-            # El precio es el de ESA planta: repartir entre plantas con precios
-            # distintos tiene que dar el precio correcto en cada línea.
-            mp = MaterialPlanta.objects.filter(material=material, planta=planta_item).first()
-            CotizacionItem.objects.create(
-                cotizacion=cotizacion, material=material, planta=planta_item,
-                cantidad=it.get("cantidad") or 0,
-                precio_unitario=(
-                    mp.precio(tipo_precio) if mp else (it.get("precio_unitario") or 0)
-                ),
+        # Todo se valida ANTES de crear nada: una línea sin precio o un ajuste
+        # mal formado no debe dejar una cotización a medias (ni en $0).
+        try:
+            lineas = _validar_lineas(items, planta, tipo_precio)
+            ajustes = _validar_ajustes(d.get("ajustes") or [])
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
+
+        notas_elegidas = d.get("notas_aclaratorias")
+        if notas_elegidas is not None:
+            notas_elegidas = [c for c in notas_elegidas if c in CLAVES_NOTAS]
+
+        with transaction.atomic():
+            cotizacion = Cotizacion.objects.create(
+                numero=_numero_cotizacion(), solicitud=solicitud, planta=planta,
+                tipo_precio=tipo_precio, notas=(d.get("notas") or "").strip() or None,
+                notas_aclaratorias=notas_elegidas, creado_por=request.user,
             )
+            for ln in lineas:
+                CotizacionItem.objects.create(cotizacion=cotizacion, **ln)
+            for orden, aj in enumerate(ajustes):
+                CotizacionAjuste.objects.create(cotizacion=cotizacion, orden=orden, **aj)
 
         solicitud.estado = "cotizada"
         solicitud.save(update_fields=["estado"])

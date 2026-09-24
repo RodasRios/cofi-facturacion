@@ -277,7 +277,12 @@ class Cotizacion(models.Model):
     aprobado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="cotizaciones_aprobadas")
     fecha_aprobacion = models.DateTimeField(null=True, blank=True)
     motivo_rechazo = models.TextField(blank=True, null=True)
+    # Notas extra que escribe el comercial, una por línea; salen como viñetas
+    # adicionales al final de las notas aclaratorias.
     notas = models.TextField(blank=True, null=True)
+    # Claves de las notas aclaratorias elegidas (ver services/notas_cotizacion.py).
+    # None = todas: así quedan las cotizaciones anteriores a poder elegirlas.
+    notas_aclaratorias = models.JSONField(null=True, blank=True)
     pdf_path = models.CharField(max_length=500, blank=True, null=True)
     creado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="cotizaciones_creadas")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -289,14 +294,33 @@ class Cotizacion(models.Model):
     def __str__(self):
         return self.numero
 
+    # ── Totales ──────────────────────────────────────────────────────────
+    # subtotal_materiales  suma de las líneas
+    # + ajustes            fletes (+), descuentos (−), en monto o porcentaje
+    # = subtotal           base antes de IVA
+    # iva                  solo sobre lo gravado (un ajuste puede no gravar IVA)
+    # total                subtotal + iva — lo que paga el cliente
+
     @property
-    def subtotal(self) -> Decimal:
-        """Suma de las líneas, sin IVA."""
+    def subtotal_materiales(self) -> Decimal:
         return sum((i.subtotal for i in self.items.all()), Decimal("0"))
 
     @property
+    def ajustes_calculados(self) -> list:
+        """[(ajuste, valor con signo)] — los descuentos salen negativos."""
+        base = self.subtotal_materiales
+        return [(a, a.valor_sobre(base)) for a in self.ajustes.all()]
+
+    @property
+    def subtotal(self) -> Decimal:
+        """Base antes de IVA: materiales más cargos, menos descuentos."""
+        return self.subtotal_materiales + sum((v for _, v in self.ajustes_calculados), Decimal("0"))
+
+    @property
     def iva(self) -> Decimal:
-        return (self.subtotal * self.iva_porcentaje / Decimal("100")).quantize(Decimal("0.01"))
+        gravado = self.subtotal_materiales + sum(
+            (v for a, v in self.ajustes_calculados if a.aplica_iva), Decimal("0"))
+        return (gravado * self.iva_porcentaje / Decimal("100")).quantize(Decimal("0.01"))
 
     @property
     def total(self) -> Decimal:
@@ -324,6 +348,12 @@ class Cotizacion(models.Model):
         return next((p for p in self.pagos.all() if p.estado != "rechazado"), None)
 
 
+ORIGEN_PRECIO_CHOICES = TIPO_PRECIO_CHOICES + [("manual", "Precio escrito a mano")]
+
+AJUSTE_TIPO_CHOICES = [("cargo", "Cargo"), ("descuento", "Descuento")]
+AJUSTE_MODO_CHOICES = [("monto", "Monto fijo"), ("porcentaje", "Porcentaje")]
+
+
 class CotizacionItem(models.Model):
     """Una línea de cotización: material, cantidad y **de qué planta sale**.
 
@@ -342,6 +372,9 @@ class CotizacionItem(models.Model):
     )
     cantidad = models.DecimalField(max_digits=14, decimal_places=2)
     precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
+    # De dónde salió el precio: la tarifa especial o detal de la planta, o uno
+    # escrito a mano. El aprobador lo ve, para saber qué está aprobando.
+    origen_precio = models.CharField(max_length=20, choices=ORIGEN_PRECIO_CHOICES, default="especial")
 
     class Meta:
         db_table = "cotizacion_items"
@@ -353,6 +386,32 @@ class CotizacionItem(models.Model):
     @property
     def planta_efectiva(self):
         return self.planta or self.cotizacion.planta
+
+
+class CotizacionAjuste(models.Model):
+    """Cargo o descuento sobre la cotización: flete, descuento comercial, etc.
+
+    El porcentaje se calcula sobre el subtotal de materiales (no sobre otros
+    ajustes), para que el orden en que se agregan no cambie el resultado.
+    """
+    cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name="ajustes")
+    tipo = models.CharField(max_length=20, choices=AJUSTE_TIPO_CHOICES)
+    modo = models.CharField(max_length=20, choices=AJUSTE_MODO_CHOICES)
+    descripcion = models.CharField(max_length=200)
+    valor = models.DecimalField(max_digits=14, decimal_places=2)
+    # Un flete, por ejemplo, puede facturarse sin IVA. Se decide por ajuste.
+    aplica_iva = models.BooleanField(default=True)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "cotizacion_ajustes"
+        ordering = ["orden", "id"]
+
+    def valor_sobre(self, base: Decimal) -> Decimal:
+        """Valor con signo: positivo si suma (cargo), negativo si resta (descuento)."""
+        bruto = (base * self.valor / Decimal("100")) if self.modo == "porcentaje" else self.valor
+        bruto = bruto.quantize(Decimal("0.01"))
+        return -bruto if self.tipo == "descuento" else bruto
 
 
 PAGO_ESTADO_CHOICES = [

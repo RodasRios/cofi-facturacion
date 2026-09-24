@@ -26,6 +26,26 @@ export interface Planta {
 export type MaterialTipo = "triturado" | "agregado" | "otro";
 
 export type TipoPrecio = "especial" | "detal";
+/** De dónde salió el precio de una línea: una tarifa de la planta o escrito a mano. */
+export type OrigenPrecio = TipoPrecio | "manual";
+
+export interface NotaAclaratoria {
+  clave: string;
+  titulo: string;
+  texto: string;
+  posicion: "antes" | "despues";
+}
+
+export interface CotizacionAjuste {
+  id: number;
+  tipo: "cargo" | "descuento";
+  modo: "monto" | "porcentaje";
+  descripcion: string;
+  valor: string;
+  aplica_iva: boolean;
+  /** Con signo y ya resuelto el porcentaje. */
+  valor_calculado: string;
+}
 
 export interface MaterialPlantaPrecio {
   id: number;
@@ -156,6 +176,7 @@ export interface SolicitudCotizacion {
   numero: string;
   cliente: number;
   cliente_nombre: string;
+  cliente_tipo_precio: TipoPrecio;
   estado: SolicitudEstado;
   obra: string | null;
   notas: string | null;
@@ -176,6 +197,7 @@ export interface CotizacionItem {
   planta_nombre: string | null;
   cantidad: string;
   precio_unitario: string;
+  origen_precio: OrigenPrecio;
   subtotal: string;
 }
 
@@ -201,6 +223,9 @@ export interface Cotizacion {
   items: CotizacionItem[];
   tipo_precio: TipoPrecio;
   iva_porcentaje: string;
+  subtotal_materiales: string;
+  ajustes: CotizacionAjuste[];
+  notas_aclaratorias: string[] | null;
   subtotal: string;
   iva: string;
   total: string;

@@ -87,3 +87,12 @@ class MaterialPrecioView(APIView):
             material=material, planta=planta, defaults=defaults,
         )
         return Response(MaterialSerializer(material).data, status=201)
+
+    def delete(self, request, material_id):
+        """Quita un material de una planta (esa planta deja de venderlo)."""
+        planta_id = request.query_params.get("planta")
+        borrados, _ = MaterialPlanta.objects.filter(material_id=material_id, planta_id=planta_id).delete()
+        if not borrados:
+            return Response({"detail": "Esa planta no tenía precio para este material"}, status=404)
+        material = Material.objects.filter(id=material_id).first()
+        return Response(MaterialSerializer(material).data)

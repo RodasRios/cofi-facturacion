@@ -231,3 +231,7 @@ body {
   color: var(--text-muted);
   padding: 6px 0 4px;
 }
+
+/* Celdas de tabla que no deben partirse: números de documento y montos. */
+.table-sharp td.nowrap { white-space: nowrap; }
+.table-sharp td.num { font-variant-numeric: tabular-nums; }

@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     User, Planta, Material, MaterialPlanta, Cliente, ClienteToken,
     SolicitudCotizacion, SolicitudCotizacionItem,
-    Cotizacion, CotizacionItem, Pago, OrdenSuministro, Seguimiento, SolicitudToken,
+    Cotizacion, CotizacionItem, CotizacionAjuste, Pago, OrdenSuministro, Seguimiento, SolicitudToken,
     Despacho, DespachoItem,
 )
 
@@ -151,6 +151,8 @@ class SolicitudTokenSerializer(serializers.ModelSerializer):
 class SolicitudCotizacionSerializer(serializers.ModelSerializer):
     items = SolicitudCotizacionItemSerializer(many=True, read_only=True)
     cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+    # La tarifa del cliente preselecciona los precios al armar la cotización.
+    cliente_tipo_precio = serializers.CharField(source="cliente.tipo_precio", read_only=True)
     creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
     tiene_cotizacion = serializers.SerializerMethodField()
     cotizaciones_rechazadas = serializers.SerializerMethodField()
@@ -158,7 +160,7 @@ class SolicitudCotizacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = SolicitudCotizacion
         fields = [
-            "id", "numero", "cliente", "cliente_nombre", "estado", "obra", "notas",
+            "id", "numero", "cliente", "cliente_nombre", "cliente_tipo_precio", "estado", "obra", "notas",
             "items", "creado_por", "creado_por_username", "tiene_cotizacion",
             "cotizaciones_rechazadas", "created_at",
         ]
@@ -182,7 +184,7 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
         model = CotizacionItem
         fields = [
             "id", "material", "material_nombre", "unidad_medida", "planta", "planta_nombre",
-            "cantidad", "precio_unitario", "subtotal",
+            "cantidad", "precio_unitario", "origen_precio", "subtotal",
         ]
 
     def get_planta_nombre(self, obj):
@@ -191,8 +193,22 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
         return planta.nombre if planta else None
 
 
+class CotizacionAjusteSerializer(serializers.ModelSerializer):
+    valor_calculado = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CotizacionAjuste
+        fields = ["id", "tipo", "modo", "descripcion", "valor", "aplica_iva", "valor_calculado"]
+
+    def get_valor_calculado(self, obj):
+        """Con signo y ya resuelto el porcentaje: lo que suma o resta de verdad."""
+        return str(obj.valor_sobre(obj.cotizacion.subtotal_materiales))
+
+
 class CotizacionSerializer(serializers.ModelSerializer):
     items = CotizacionItemSerializer(many=True, read_only=True)
+    ajustes = CotizacionAjusteSerializer(many=True, read_only=True)
+    subtotal_materiales = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     planta_nombre = serializers.CharField(source="planta.nombre", read_only=True)
     solicitud_numero = serializers.CharField(source="solicitud.numero", read_only=True)
     cliente_nombre = serializers.CharField(source="solicitud.cliente.nombre", read_only=True)
@@ -212,7 +228,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "id", "numero", "solicitud", "solicitud_numero", "cliente_nombre",
             "planta", "planta_nombre", "estado", "aprobado_por", "aprobado_por_username",
             "fecha_aprobacion", "motivo_rechazo", "notas", "pdf_path", "items",
-            "tipo_precio", "iva_porcentaje", "subtotal", "iva", "total",
+            "tipo_precio", "iva_porcentaje", "subtotal_materiales", "ajustes",
+            "subtotal", "iva", "total", "notas_aclaratorias",
             "creado_por", "creado_por_username", "tiene_orden_suministro",
             "plantas_nombres", "tiene_pago", "pagos_rechazados", "created_at",
         ]

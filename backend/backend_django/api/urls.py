@@ -10,6 +10,7 @@ from api.views.cliente_token_views import (
 from api.views.solicitud_views import SolicitudCotizacionListCreateView, SolicitudCotizacionDetailView
 from api.views.cotizacion_views import (
     CotizacionListCreateView, CotizacionDetailView, CotizacionAprobarView, CotizacionPdfView,
+    NotasAclaratoriasView,
 )
 from api.views.pago_views import PagoListCreateView, PagoComprobanteUploadView, PagoAprobarView
 from api.views.orden_suministro_views import (
@@ -77,6 +78,7 @@ urlpatterns += p("solicitudes-cotizacion/<int:solicitud_id>/", SolicitudCotizaci
 urlpatterns += p("solicitudes-cotizacion/", SolicitudCotizacionListCreateView.as_view())
 
 # Cotizaciones
+urlpatterns += p("cotizaciones/notas-aclaratorias/", NotasAclaratoriasView.as_view())
 urlpatterns += p("cotizaciones/<int:cotizacion_id>/aprobar/", CotizacionAprobarView.as_view())
 urlpatterns += p("cotizaciones/<int:cotizacion_id>/pdf/", CotizacionPdfView.as_view())
 urlpatterns += p("cotizaciones/<int:cotizacion_id>/", CotizacionDetailView.as_view())

@@ -20,3 +20,9 @@ export async function setPrecioMaterial(
   const res = await client.post(`/materiales/${materialId}/precios/`, { planta: plantaId, ...precios });
   return res.data;
 }
+
+/** Quita el material de esa planta: deja de ofrecerse al cotizar allí. */
+export async function quitarPrecioMaterial(materialId: number, plantaId: number): Promise<Material> {
+  const res = await client.delete(`/materiales/${materialId}/precios/`, { params: { planta: plantaId } });
+  return res.data;
+}
