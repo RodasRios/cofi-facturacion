@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { getOrdenesSuministro, getPorOrdenar, anularOrdenSuministro } from "../api/ordenesSuministro";
 import { Icon } from "../components/ui/Icon";
 import { PdfViewerModal } from "../components/ui/PdfViewerModal";
-import { TransporteOrden } from "../components/TransporteOrden";
+import { EditarOrden } from "../components/EditarOrden";
 import { NuevaOrden } from "../components/NuevaOrden";
 import { NotificarPlanta } from "../components/NotificarPlanta";
 import { pesos } from "../lib/cotizacion";
@@ -146,7 +146,7 @@ export function OrdenesSuministroPage() {
                     onClick={() => setPdfViewer({ url: `/ordenes-suministro/${o.id}/pdf/`, filename: `${o.numero}.pdf` })}>
                     <Icon name="picture_as_pdf" size={16} />
                   </button>
-                  <button className="btn-ghost" title="Fecha de retiro, placas y observación"
+                  <button className="btn-ghost" title="Editar orden: cantidades, fecha, placas y observación"
                     onClick={() => setAbierta(abierta === o.id ? null : o.id)}>
                     <Icon name="edit" size={16} />
                   </button>
@@ -161,7 +161,7 @@ export function OrdenesSuministroPage() {
               abierta === o.id && (
                 <tr key={`${o.id}-transporte`}>
                   <td colSpan={7} style={{ background: "var(--bg-surface-2)", padding: 0 }}>
-                    <TransporteOrden orden={o} onGuardado={() => setAbierta(null)} />
+                    <EditarOrden orden={o} onListo={() => setAbierta(null)} />
                   </td>
                 </tr>
               ),

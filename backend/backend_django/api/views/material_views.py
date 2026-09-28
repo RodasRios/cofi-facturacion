@@ -96,3 +96,51 @@ class MaterialPrecioView(APIView):
             return Response({"detail": "Esa planta no tenía precio para este material"}, status=404)
         material = Material.objects.filter(id=material_id).first()
         return Response(MaterialSerializer(material).data)
+
+
+class MaterialUnirView(APIView):
+    """Une dos materiales que son el mismo con nombres distintos.
+
+    La lista de precios de cada planta nombra distinto el mismo material
+    ("Gravilla 3/4" / "Gravilla (canto rodado) 3/4\\""), y en las solicitudes
+    salían los dos. `POST /materiales/<origen>/unir/ {destino}` pasa todo lo
+    del origen al destino (precios por planta, solicitudes, cotizaciones y
+    despachos) y desactiva el origen. Si las dos tienen precio en la misma
+    planta, gana el del destino.
+    """
+    permission_classes = [CATALOGO]
+
+    def post(self, request, material_id):
+        from django.db import transaction
+        from api.models import SolicitudCotizacionItem, CotizacionItem, DespachoItem
+
+        origen = Material.objects.filter(id=material_id).first()
+        destino = Material.objects.filter(id=request.data.get("destino")).first()
+        if not origen or not destino:
+            return Response({"detail": "Material no encontrado"}, status=404)
+        if origen.id == destino.id:
+            return Response({"detail": "Elige un material distinto"}, status=400)
+        if origen.unidad_medida != destino.unidad_medida:
+            return Response({
+                "detail": f"No se pueden unir: {origen.nombre} va en {origen.unidad_medida} "
+                          f"y {destino.nombre} en {destino.unidad_medida}.",
+            }, status=400)
+
+        with transaction.atomic():
+            plantas_destino = set(destino.precios_planta.values_list("planta_id", flat=True))
+            movidos = 0
+            for mp in origen.precios_planta.all():
+                if mp.planta_id in plantas_destino:
+                    mp.delete()
+                else:
+                    mp.material = destino
+                    mp.save(update_fields=["material"])
+                    movidos += 1
+            for modelo in (SolicitudCotizacionItem, CotizacionItem, DespachoItem):
+                modelo.objects.filter(material=origen).update(material=destino)
+            origen.activo = False
+            origen.save(update_fields=["activo"])
+        return Response({
+            "detail": f"{origen.nombre} quedó unido a {destino.nombre} ({movidos} precio(s) de planta movidos).",
+            "material": MaterialSerializer(destino).data,
+        })

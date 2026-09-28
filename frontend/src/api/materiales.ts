@@ -26,3 +26,14 @@ export async function quitarPrecioMaterial(materialId: number, plantaId: number)
   const res = await client.delete(`/materiales/${materialId}/precios/`, { params: { planta: plantaId } });
   return res.data;
 }
+
+export async function renombrarMaterial(id: number, nombre: string): Promise<Material> {
+  const res = await client.patch(`/materiales/${id}/`, { nombre });
+  return res.data;
+}
+
+/** Pasa todo lo de `origen` (precios, solicitudes, cotizaciones, despachos) a `destino` y lo desactiva. */
+export async function unirMaterial(origen: number, destino: number): Promise<{ detail: string }> {
+  const res = await client.post(`/materiales/${origen}/unir/`, { destino });
+  return res.data;
+}

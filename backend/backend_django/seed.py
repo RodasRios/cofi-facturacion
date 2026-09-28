@@ -11,7 +11,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "facturacion.settings")
 django.setup()
 
 from django.core.management import call_command  # noqa: E402
-from api.models import User  # noqa: E402
+from api.models import MaterialPlanta, User  # noqa: E402
 
 
 
@@ -27,8 +27,12 @@ def run():
         else:
             print("Usuario admin creado con la contraseña de ADMIN_PASSWORD.")
 
-    # Plantas, materiales y precios reales. Actualiza los valores si ya existen.
-    call_command("cargar_precios")
+    # Catálogo real, solo en el primer arranque. Antes corría en cada arranque
+    # (RUN_SEED=true por defecto) y pisaba los precios y nombres editados en
+    # Plantas y precios. Para recargar la lista a propósito:
+    #   python manage.py cargar_precios
+    if not MaterialPlanta.objects.exists():
+        call_command("cargar_precios")
 
 
 if __name__ == "__main__":

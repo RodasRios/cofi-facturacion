@@ -4,18 +4,51 @@ import { toast } from "sonner";
 import { Icon } from "./ui/Icon";
 import { getMateriales } from "../api/materiales";
 import { getPlantas } from "../api/plantas";
-import { createCotizacion, getNotasAclaratorias } from "../api/cotizaciones";
+import { createCotizacion, actualizarCotizacion, getNotasAclaratorias } from "../api/cotizaciones";
 import {
   type Ajuste, type Linea, type Reparto,
   plantasConPrecio, precioDeTarifa, precioLinea, repartoInicial, sumaCantidades,
   calcularTotales, pesos, IVA_PORCENTAJE,
 } from "../lib/cotizacion";
-import type { SolicitudCotizacion, TipoPrecio } from "../types";
+import type { Cotizacion, SolicitudCotizacion, TipoPrecio } from "../types";
 
 interface Props {
   solicitudes: SolicitudCotizacion[];
+  /** Si viene, el formulario edita esta cotización en vez de crear una. */
+  editar?: Cotizacion;
   onCreada: () => void;
   onCancelar: () => void;
+}
+
+/** La cotización en edición vista como "solicitud": un material por bloque con lo cotizado. */
+function solicitudDe(c: Cotizacion): SolicitudCotizacion {
+  const porMaterial = new Map<number, SolicitudCotizacion["items"][number]>();
+  c.items.forEach(i => {
+    const previo = porMaterial.get(i.material);
+    porMaterial.set(i.material, {
+      id: i.material, material: i.material, material_nombre: i.material_nombre, unidad_medida: i.unidad_medida,
+      cantidad: String(Number(previo?.cantidad ?? 0) + Number(i.cantidad)),
+    });
+  });
+  return {
+    id: c.solicitud, numero: c.solicitud_numero, cliente: 0, cliente_nombre: c.cliente_nombre,
+    cliente_tipo_precio: c.tipo_precio, estado: "cotizada", obra: null, notas: null,
+    items: [...porMaterial.values()], creado_por: null, creado_por_username: null,
+    tiene_cotizacion: true, cotizaciones_rechazadas: 0, created_at: c.created_at,
+  };
+}
+
+function repartoDe(c: Cotizacion): Reparto {
+  const r: Reparto = {};
+  c.items.forEach(i => {
+    (r[i.material] ??= []).push({
+      planta: i.planta_efectiva ? String(i.planta_efectiva) : "",
+      cantidad: String(Number(i.cantidad)),
+      origen: i.origen_precio,
+      precioManual: i.origen_precio === "manual" ? String(Number(i.precio_unitario)) : "",
+    });
+  });
+  return r;
 }
 
 /**
@@ -23,29 +56,38 @@ interface Props {
  * de qué planta sale cada material y a qué precio (tarifa o a mano), cargos
  * y descuentos, y qué notas aclaratorias se imprimen.
  */
-export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
+export function NuevaCotizacion({ solicitudes, editar, onCreada, onCancelar }: Props) {
   const qc = useQueryClient();
   const { data: materiales = [] } = useQuery({ queryKey: ["materiales"], queryFn: getMateriales });
   const { data: plantas = [] } = useQuery({ queryKey: ["plantas"], queryFn: () => getPlantas() });
   const { data: notas = [] } = useQuery({ queryKey: ["notas-aclaratorias"], queryFn: getNotasAclaratorias });
 
-  const [solicitudId, setSolicitudId] = useState("");
-  const [tarifa, setTarifa] = useState<TipoPrecio>("especial");
-  const [reparto, setReparto] = useState<Reparto>({});
-  const [ajustes, setAjustes] = useState<Ajuste[]>([]);
+  const [solicitudId, setSolicitudId] = useState(editar ? String(editar.solicitud) : "");
+  const [tarifa, setTarifa] = useState<TipoPrecio>(editar?.tipo_precio ?? "especial");
+  const [reparto, setReparto] = useState<Reparto>(() => editar ? repartoDe(editar) : {});
+  const [ajustes, setAjustes] = useState<Ajuste[]>(() => (editar?.ajustes ?? []).map(a => ({
+    tipo: a.tipo, modo: a.modo, descripcion: a.descripcion, valor: String(Number(a.valor)), aplicaIva: a.aplica_iva,
+  })));
   // null = todas las notas (el valor por defecto del formato).
-  const [notasSel, setNotasSel] = useState<Set<string> | null>(null);
+  const [notasSel, setNotasSel] = useState<Set<string> | null>(() =>
+    editar?.notas_aclaratorias ? new Set(editar.notas_aclaratorias) : null);
   const [notasAbiertas, setNotasAbiertas] = useState<Set<string>>(new Set());
-  const [notasExtra, setNotasExtra] = useState("");
+  const [notasExtra, setNotasExtra] = useState(editar?.notas ?? "");
 
-  const solicitud = useMemo(() => solicitudes.find(s => String(s.id) === solicitudId), [solicitudes, solicitudId]);
+  // Al editar, las cantidades se pueden cambiar: no se exige que el reparto
+  // sume lo que pidió la solicitud.
+  const [solicitudEditada] = useState(() => editar ? solicitudDe(editar) : null);
+  const solicitud = useMemo(
+    () => solicitudEditada ?? solicitudes.find(s => String(s.id) === solicitudId),
+    [solicitudEditada, solicitudes, solicitudId],
+  );
 
   // Al elegir solicitud (o cuando llegan los catálogos), se arma el reparto
   // inicial con la tarifa del cliente. Patrón de React para ajustar estado
   // cuando cambian los datos, sin useEffect.
   const base = `${solicitudId}|${materiales.length}|${plantas.length}`;
   const [baseActual, setBaseActual] = useState("");
-  if (base !== baseActual) {
+  if (!editar && base !== baseActual) {
     setBaseActual(base);
     const t = solicitud?.cliente_tipo_precio ?? "especial";
     setTarifa(t);
@@ -59,8 +101,8 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
     const material = materiales.find(m => m.id === item.material);
     const opciones = plantasConPrecio(material, plantas, tarifa);
     const lineas = reparto[item.material] ?? [];
-    const pedido = Number(item.cantidad);
     const suma = sumaCantidades(lineas);
+    const pedido = editar ? suma : Number(item.cantidad);
     const detalle = lineas.map(l => {
       const precio = precioLinea(l, opciones);
       return { precio, subtotal: precio != null ? precio * (Number(l.cantidad) || 0) : 0 };
@@ -132,7 +174,7 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
         origen_precio: l.origen,
         ...(l.origen === "manual" ? { precio_unitario: Number(l.precioManual) } : {}),
       })));
-      return createCotizacion({
+      const cuerpo = {
         solicitud: Number(solicitudId),
         planta: items[0].planta,
         tipo_precio: tarifa,
@@ -143,14 +185,17 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
         })),
         // En el orden del formato, no en el orden en que se marcaron.
         notas_aclaratorias: notas.filter(n => elegidas.has(n.clave)).map(n => n.clave),
-        notas: notasExtra.trim() || undefined,
-      });
+        notas: notasExtra.trim() || (editar ? "" : undefined),
+      };
+      return editar ? actualizarCotizacion(editar.id, cuerpo) : createCotizacion(cuerpo);
     },
     onSuccess: (c) => {
       qc.invalidateQueries({ queryKey: ["cotizaciones"] });
       qc.invalidateQueries({ queryKey: ["solicitudes"] });
       qc.invalidateQueries({ queryKey: ["tablero"] });
-      toast.success(`Cotización ${c.numero} generada`);
+      toast.success(editar
+        ? `Cotización ${c.numero} actualizada${editar.estado === "aprobada" ? " — vuelve a aprobación" : ""}`
+        : `Cotización ${c.numero} generada`);
       onCreada();
     },
     onError: (e: unknown) => {
@@ -164,12 +209,18 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
       <div className="nc-cabecera">
         <div className="nc-campo">
           <label className="section-label">Solicitud *</label>
+          {editar ? (
+            <div className="nc-editando">
+              <Icon name="edit" size={14} />Editando <strong>{editar.numero}</strong> · {editar.cliente_nombre}
+            </div>
+          ) : (
           <select className="input-base" value={solicitudId} onChange={e => setSolicitudId(e.target.value)} required>
             <option value="">Selecciona una solicitud</option>
             {solicitudes.map(s => (
               <option key={s.id} value={s.id}>{s.numero} — {s.cliente_nombre}{s.obra ? ` · ${s.obra}` : ""}</option>
             ))}
           </select>
+          )}
         </div>
         <div className="nc-campo">
           <label className="section-label">Tarifa</label>
@@ -206,7 +257,9 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
                     <div className="nc-material-cab">
                       <strong>{b.item.material_nombre}</strong>
                       <span className={descuadre ? "nc-mal" : "nc-tenue"}>
-                        {b.suma.toLocaleString("es-CO")} de {b.pedido.toLocaleString("es-CO")} {b.item.unidad_medida}
+                        {editar
+                          ? `${b.suma.toLocaleString("es-CO")} ${b.item.unidad_medida}`
+                          : `${b.suma.toLocaleString("es-CO")} de ${b.pedido.toLocaleString("es-CO")} ${b.item.unidad_medida}`}
                         {descuadre && (b.suma > b.pedido ? " — sobra" : " — falta")}
                       </span>
                     </div>
@@ -248,9 +301,9 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
                               <div className="nc-precio">
                                 <select className="input-base" value={l.origen} disabled={!op && l.origen !== "manual"}
                                   onChange={e => editarLinea(b.item.material, idx, { origen: e.target.value as Linea["origen"] })}>
-                                  <option value="especial">Especial{op ? ` · ${pesos(op.especial)}` : ""}</option>
+                                  <option value="especial">Venta especial{op ? ` · ${pesos(op.especial)}` : ""}</option>
                                   <option value="detal" disabled={!!op && op.detal == null}>
-                                    Detal{op ? (op.detal != null ? ` · ${pesos(op.detal)}` : " · no maneja") : ""}
+                                    Venta detal{op ? (op.detal != null ? ` · ${pesos(op.detal)}` : " · no maneja") : ""}
                                   </option>
                                   <option value="manual">Otro precio…</option>
                                 </select>
@@ -389,7 +442,8 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
             )}
 
             <button type="submit" className="btn-primary nc-generar" disabled={!listo || crear.isPending}>
-              <Icon name="description" size={15} />{crear.isPending ? "Generando…" : "Generar cotización"}
+              <Icon name={editar ? "save" : "description"} size={15} />
+              {crear.isPending ? "Guardando…" : editar ? "Guardar cambios" : "Generar cotización"}
             </button>
             <button type="button" className="btn-secondary nc-generar" onClick={onCancelar}>Cancelar</button>
           </aside>
@@ -464,6 +518,7 @@ export function NuevaCotizacion({ solicitudes, onCreada, onCancelar }: Props) {
         .nc-nota-titulo .material-symbols-outlined { vertical-align: middle; }
         .nc-nota-texto { font-size: 11.5px; color: var(--text-secondary); margin: 4px 0 2px; line-height: 1.45; }
         .nc-textarea { width: 100%; resize: vertical; font-family: inherit; }
+        .nc-editando { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 7px 0; }
         .nc-resumen { position: sticky; top: 12px; border: 1px solid var(--border); padding: 12px 14px; background: var(--bg-surface); }
         .nc-resumen dl { margin: 8px 0 12px; }
         .nc-resumen dl > div { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 3px 0; }

@@ -23,7 +23,7 @@ export interface NuevoAjuste {
   aplica_iva: boolean;
 }
 
-export async function createCotizacion(data: {
+export type CuerpoCotizacion = {
   solicitud: number;
   /** Planta por defecto (la de la primera línea). */
   planta: number;
@@ -34,9 +34,21 @@ export async function createCotizacion(data: {
   notas_aclaratorias: string[];
   /** Notas extra, una por línea. */
   notas?: string;
-}): Promise<Cotizacion> {
+};
+
+export async function createCotizacion(data: CuerpoCotizacion): Promise<Cotizacion> {
   const res = await client.post("/cotizaciones/", data);
   return res.data;
+}
+
+/** Reemplaza el contenido. Si estaba aprobada (sin pagos ni órdenes), vuelve a aprobación. */
+export async function actualizarCotizacion(id: number, data: CuerpoCotizacion): Promise<Cotizacion> {
+  const res = await client.put(`/cotizaciones/${id}/`, data);
+  return res.data;
+}
+
+export async function eliminarCotizacion(id: number): Promise<void> {
+  await client.delete(`/cotizaciones/${id}/`);
 }
 
 export async function getNotasAclaratorias(): Promise<NotaAclaratoria[]> {
@@ -46,5 +58,10 @@ export async function getNotasAclaratorias(): Promise<NotaAclaratoria[]> {
 
 export async function aprobarCotizacion(id: number, aprobar: boolean, motivo?: string): Promise<Cotizacion> {
   const res = await client.post(`/cotizaciones/${id}/aprobar/`, { aprobar, motivo });
+  return res.data;
+}
+
+export async function getCotizacion(id: number): Promise<Cotizacion> {
+  const res = await client.get(`/cotizaciones/${id}/`);
   return res.data;
 }

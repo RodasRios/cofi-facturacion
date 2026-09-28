@@ -1129,3 +1129,153 @@ class MigracionOrdenesTest(TestCase):
         mig.permisos_desde_rol(django_apps, None)
         u.refresh_from_db()
         self.assertEqual(u.permisos, ["tablero", "pagos", "aprobar_pagos"])
+
+
+@override_settings(GENERATED_PDF_DIR=_TMP_PDFS)
+class EdicionYCorreccionesTest(TestCase):
+    """Pedidos de la clienta: editar/eliminar solicitudes, cotizaciones y órdenes,
+    aprobar pagos solo financiera, responsable del pago y nombres unificados."""
+
+    def setUp(self):
+        from api.models import CotizacionItem  # noqa: F401
+        self.admin = User(username="jefe", rol="comercial", is_admin=True, permisos=[])
+        self.admin.set_password("x"); self.admin.save()
+        self.fin = User(username="fin", rol="financiera", nombre="Laura Financiera",
+                        permisos=PERMISOS_POR_ROL["financiera"])
+        self.fin.set_password("x"); self.fin.save()
+        self.planta = Planta.objects.create(nombre="Planta Norte")
+        self.material = Material.objects.create(nombre="Arena", unidad_medida="m3")
+        MaterialPlanta.objects.create(material=self.material, planta=self.planta, precio_especial=100)
+        self.cliente = Cliente.objects.create(nombre="ACME", numero_vinculacion="VIN-0001")
+        self.api = APIClient()
+        self._login(self.admin)
+
+    def _login(self, u):
+        self.api.credentials()
+        r = self.api.post("/api/v1/auth/login", {"username": u.username, "password": "x"}, format="json")
+        self.api.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access_token"])
+
+    def _solicitud(self, cantidad=10):
+        r = self.api.post("/api/v1/solicitudes-cotizacion/", {
+            "cliente": self.cliente.id, "items": [{"material": self.material.id, "cantidad": cantidad}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()
+
+    def _cotizar(self, sol, cantidad=10):
+        r = self.api.post("/api/v1/cotizaciones/", {
+            "solicitud": sol["id"], "planta": self.planta.id,
+            "items": [{"material": self.material.id, "planta": self.planta.id, "cantidad": cantidad}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()
+
+    def test_consecutivo_no_se_repite_al_borrar(self):
+        a, b, c = self._solicitud(), self._solicitud(), self._solicitud()
+        self.assertEqual(self.api.delete(f"/api/v1/solicitudes-cotizacion/{b['id']}/").status_code, 204)
+        d = self._solicitud()
+        self.assertEqual(d["numero"], "SC-0004")
+
+    def test_editar_y_eliminar_solicitud(self):
+        sol = self._solicitud()
+        r = self.api.patch(f"/api/v1/solicitudes-cotizacion/{sol['id']}/", {
+            "obra": "Obra nueva", "items": [{"material": self.material.id, "cantidad": 25}],
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["obra"], "Obra nueva")
+        self.assertEqual(Decimal(r.json()["items"][0]["cantidad"]), Decimal("25"))
+        cot = self._cotizar(sol)
+        # Con cotización viva no se toca la solicitud.
+        self.assertEqual(self.api.patch(f"/api/v1/solicitudes-cotizacion/{sol['id']}/", {"obra": "X"}, format="json").status_code, 400)
+        self.assertEqual(self.api.delete(f"/api/v1/solicitudes-cotizacion/{sol['id']}/").status_code, 400)
+        # Borrada la cotización, la solicitud queda por cotizar y se puede borrar.
+        self.assertEqual(self.api.delete(f"/api/v1/cotizaciones/{cot['id']}/").status_code, 204)
+        self.assertEqual(SolicitudCotizacion.objects.get(id=sol["id"]).estado, "pendiente")
+        self.assertEqual(self.api.delete(f"/api/v1/solicitudes-cotizacion/{sol['id']}/").status_code, 204)
+
+    def test_editar_cotizacion_aprobada_vuelve_a_aprobacion(self):
+        cot = self._cotizar(self._solicitud())
+        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
+        r = self.api.put(f"/api/v1/cotizaciones/{cot['id']}/", {
+            "planta": self.planta.id, "notas": "Precio especial acordado",
+            "items": [{"material": self.material.id, "planta": self.planta.id, "cantidad": 20,
+                       "origen_precio": "manual", "precio_unitario": 90}],
+            "ajustes": [{"tipo": "cargo", "modo": "monto", "descripcion": "Flete", "valor": 500, "aplica_iva": False}],
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["estado"], "pendiente_aprobacion")
+        self.assertEqual(r.json()["numero"], cot["numero"])
+        self.assertEqual(Decimal(r.json()["subtotal"]), Decimal("2300"))
+
+    def test_cotizacion_con_pagos_no_se_edita_ni_borra(self):
+        cot = self._cotizar(self._solicitud())
+        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
+        self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 100}, format="json")
+        self.assertEqual(self.api.delete(f"/api/v1/cotizaciones/{cot['id']}/").status_code, 400)
+        r = self.api.put(f"/api/v1/cotizaciones/{cot['id']}/", {
+            "items": [{"material": self.material.id, "planta": self.planta.id, "cantidad": 5}]}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_aprobar_pagos_solo_con_permiso_explicito(self):
+        cot = self._cotizar(self._solicitud())
+        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
+        pago = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 100}, format="json").json()
+        # El admin registra pero no aprueba.
+        self.assertEqual(self.api.post(f"/api/v1/pagos/{pago['id']}/aprobar/", {"aprobar": True}, format="json").status_code, 403)
+        self._login(self.fin)
+        r = self.api.post(f"/api/v1/pagos/{pago['id']}/aprobar/", {"aprobar": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["aprobado_por_nombre"], "Laura Financiera")
+        self.assertEqual(r.json()["creado_por_nombre"], "jefe")
+
+    def test_editar_orden_y_volver_a_avisar(self):
+        cot = self._cotizar(self._solicitud(), cantidad=50)
+        self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
+        Pago.objects.create(cotizacion_id=cot["id"], monto=1000, estado="aprobado")
+        linea = cot["items"][0]["id"]
+        orden = self.api.post("/api/v1/ordenes-suministro/", {
+            "cotizacion": cot["id"], "planta": self.planta.id,
+            "items": [{"cotizacion_item": linea, "cantidad": 20}]}, format="json").json()
+        self.api.post(f"/api/v1/ordenes-suministro/{orden['id']}/notificar/", {"canales": ["manual"]}, format="json")
+        self.api.post("/api/v1/despachos/", {"orden_suministro": orden["id"], "fecha": "2026-10-01",
+                                             "items": [{"material": self.material.id, "cantidad": 15}]}, format="json")
+
+        # Subir a 50 (todo el saldo) se puede; a 51 no; bajar de lo despachado tampoco.
+        url = f"/api/v1/ordenes-suministro/{orden['id']}/"
+        self.assertEqual(self.api.patch(url, {"items": [{"cotizacion_item": linea, "cantidad": 51}]}, format="json").status_code, 400)
+        self.assertEqual(self.api.patch(url, {"items": [{"cotizacion_item": linea, "cantidad": 10}]}, format="json").status_code, 400)
+        r = self.api.patch(url, {"items": [{"cotizacion_item": linea, "cantidad": 50}], "placas_cliente": "ABC123"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(Decimal(r.json()["items"][0]["cantidad"]), Decimal("50"))
+        self.assertFalse(r.json()["notificada_planta"])
+
+        # Solo cambiar la observación no obliga a volver a avisar.
+        self.api.post(f"/api/v1/ordenes-suministro/{orden['id']}/notificar/", {"canales": ["manual"]}, format="json")
+        r = self.api.patch(url, {"notas": "Entrar por la portería 2"}, format="json")
+        self.assertTrue(r.json()["notificada_planta"])
+
+    def test_unir_materiales(self):
+        otro = Material.objects.create(nombre="Arena fina", unidad_medida="m3")
+        p2 = Planta.objects.create(nombre="Planta Sur")
+        MaterialPlanta.objects.create(material=otro, planta=p2, precio_especial=80)
+        MaterialPlanta.objects.create(material=otro, planta=self.planta, precio_especial=999)
+        sol = self._solicitud()
+        SolicitudCotizacionItem.objects.create(solicitud_id=sol["id"], material=otro, cantidad=3)
+        r = self.api.post(f"/api/v1/materiales/{otro.id}/unir/", {"destino": self.material.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        otro.refresh_from_db()
+        self.assertFalse(otro.activo)
+        precios = {mp.planta_id: mp.precio_especial for mp in MaterialPlanta.objects.filter(material=self.material)}
+        self.assertEqual(precios, {self.planta.id: Decimal("100"), p2.id: Decimal("80")})
+        self.assertFalse(SolicitudCotizacionItem.objects.filter(material=otro).exists())
+
+    def test_seed_no_pisa_precios_editados(self):
+        import importlib, sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        seed = importlib.import_module("seed")
+        mp = MaterialPlanta.objects.first()
+        mp.precio_especial = 12345
+        mp.save()
+        seed.run()
+        mp.refresh_from_db()
+        self.assertEqual(mp.precio_especial, Decimal("12345"))

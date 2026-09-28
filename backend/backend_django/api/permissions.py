@@ -3,7 +3,8 @@
 Cada usuario tiene una lista de permisos (`User.permisos`) que el superusuario
 o un admin marcan en Configuración → Usuarios. Un permiso abre una pestaña (y
 lo que hace falta leer para trabajar en ella); los de aprobación van aparte
-para poder separar quien arma de quien aprueba. `is_admin` los tiene todos.
+para poder separar quien arma de quien aprueba. `is_admin` los tiene todos,
+menos los EXCLUSIVOS (aprobar pagos), que hay que marcar a propósito.
 
 `User.rol` quedó solo como etiqueta de área (sale en el tablero como
 "responsable"); ya no decide qué puede hacer nadie.
@@ -26,6 +27,11 @@ PERMISOS = [
 ]
 CLAVES = [p[0] for p in PERMISOS]
 
+# Permisos que ni un administrador tiene por el solo hecho de serlo: hay que
+# marcarlos a propósito. Aprobar pagos es de financiera — que un admin pueda
+# aprobar la plata que él mismo registró es justo lo que se quiere evitar.
+EXCLUSIVOS = {"aprobar_pagos"}
+
 # Permisos de partida para los usuarios que existían antes, según su rol.
 PERMISOS_POR_ROL = {
     "comercial": ["tablero", "clientes", "solicitudes", "cotizaciones", "pagos", "ordenes"],
@@ -38,10 +44,8 @@ PERMISOS_POR_ROL = {
 def tiene(user, *claves):
     if not (user and user.is_authenticated):
         return False
-    if user.is_admin:
-        return True
     propios = set(user.permisos or [])
-    return any(c in propios for c in claves)
+    return any(c in propios or (user.is_admin and c not in EXCLUSIVOS) for c in claves)
 
 
 def plantas_de(user):

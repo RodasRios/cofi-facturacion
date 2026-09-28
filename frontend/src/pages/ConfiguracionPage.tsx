@@ -9,7 +9,7 @@ import { actualizarPerfil, cambiarPassword, uploadFirma, borrarFirma, getFirmaBl
 import { getUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario, type UsuarioDatos } from "../api/usuarios";
 import { mensajeError } from "../lib/errores";
 import { getPlantas } from "../api/plantas";
-import { PERMISOS, PLANTILLAS } from "../lib/permisos";
+import { EXCLUSIVOS, PERMISOS, PLANTILLAS } from "../lib/permisos";
 import type { Permiso, User } from "../types";
 
 
@@ -274,14 +274,14 @@ function FormUsuario({ inicial, onCerrar }: { inicial: User | null; onCerrar: ()
         <label>Teléfono<input className="input-base" value={d.telefono ?? ""} onChange={e => set("telefono", e.target.value)} /></label>
         <label>Correo<input className="input-base" type="email" value={d.email ?? ""} onChange={e => set("email", e.target.value)} /></label>
 
-        <fieldset className="cfg-ancho cfg-permisos" disabled={esAdminForm}>
+        <fieldset className="cfg-ancho cfg-permisos">
           <legend>
             Pestañas y permisos
-            {esAdminForm && <small> — un administrador tiene acceso a todo</small>}
+            {esAdminForm && <small> — un administrador tiene acceso a todo, menos aprobar pagos</small>}
           </legend>
           <div className="cfg-plantillas">
-            <span>Plantilla:</span>
-            {PLANTILLAS.map(t => {
+            {!esAdminForm && <span>Plantilla:</span>}
+            {!esAdminForm && PLANTILLAS.map(t => {
               const igual = t.permisos.length === permisos.length && t.permisos.every(c => permisos.includes(c));
               return (
                 <button type="button" key={t.nombre} className={igual ? "activo" : ""} onClick={() => set("permisos", [...t.permisos])}>
@@ -289,18 +289,24 @@ function FormUsuario({ inicial, onCerrar }: { inicial: User | null; onCerrar: ()
                 </button>
               );
             })}
-            <button type="button" onClick={() => set("permisos", [])}>Ninguno</button>
+            {!esAdminForm && <button type="button" onClick={() => set("permisos", [])}>Ninguno</button>}
           </div>
           <div className="cfg-grupos">
             {GRUPOS.map(g => (
               <div key={g.pestana} className={`cfg-grupo ${g.permisos.some(p => permisos.includes(p.clave)) ? "activo" : ""}`}>
                 <strong>{g.pestana}</strong>
-                {g.permisos.map(p => (
-                  <label key={p.clave}>
-                    <input type="checkbox" checked={esAdminForm || permisos.includes(p.clave)} onChange={() => togglePermiso(p.clave)} />
-                    <span>{p.desc}</span>
-                  </label>
-                ))}
+                {g.permisos.map(p => {
+                  const exclusivo = EXCLUSIVOS.includes(p.clave);
+                  // Al admin se le marcan solos todos menos los exclusivos, que decide quien lo crea.
+                  const heredado = esAdminForm && !exclusivo;
+                  return (
+                    <label key={p.clave} className={heredado ? "heredado" : ""}>
+                      <input type="checkbox" disabled={heredado}
+                        checked={heredado || permisos.includes(p.clave)} onChange={() => togglePermiso(p.clave)} />
+                      <span>{p.desc}{exclusivo && <em className="cfg-exclusivo"> · solo financiera</em>}</span>
+                    </label>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -455,7 +461,7 @@ function Usuarios() {
                   <td>
                     {u.is_superadmin
                       ? <span className="badge cfg-badge-super">superusuario</span>
-                      : u.is_admin ? <span className="badge cfg-badge-admin">admin · todo</span>
+                      : u.is_admin ? <span className="badge cfg-badge-admin">admin{u.permisos.includes("aprobar_pagos") && " · aprueba pagos"}</span>
                       : pestanas.length ? <span className="cfg-pestanas">{pestanas.join(" · ")}</span>
                       : <span className="badge cfg-badge-off">sin acceso</span>}
                     {nombresPlantas.length > 0 && !u.is_admin && <span className="cfg-sub"><Icon name="factory" size={11} /> {nombresPlantas.join(", ")}</span>}
@@ -511,7 +517,8 @@ function Usuarios() {
       )}
 
       <p className="cfg-meta" style={{ marginTop: 14 }}>
-        Cada pestaña tiene su permiso. Un <strong>administrador</strong> tiene todas, además de plantas, precios y usuarios;
+        Cada pestaña tiene su permiso. Un <strong>administrador</strong> tiene todas (menos aprobar pagos, que es solo de
+        quien se marque, normalmente financiera), además de plantas, precios y usuarios;
         el <strong>superusuario</strong> además gestiona administradores.
       </p>
     </div>
@@ -596,7 +603,8 @@ export function ConfiguracionPage() {
         .cfg-permisos { border: none; padding: 0; margin: 4px 0 0; }
         .cfg-permisos legend { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; padding: 0; }
         .cfg-permisos legend small { font-weight: 400; color: var(--text-muted); }
-        .cfg-permisos:disabled .cfg-grupos, .cfg-permisos:disabled .cfg-plantillas { opacity: 0.55; }
+        .cfg-grupo label.heredado { opacity: 0.55; }
+        .cfg-exclusivo { color: #b45309; font-style: normal; font-weight: 600; }
         .cfg-plantillas { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); }
         .cfg-plantillas button {
           display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;

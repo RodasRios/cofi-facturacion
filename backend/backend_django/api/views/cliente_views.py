@@ -5,6 +5,7 @@ from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from api.permissions import Requiere
+from api.numeracion import siguiente
 from api.models import Cliente
 from api.serializers import ClienteSerializer
 from services.pdf_service import generate_vinculacion
@@ -13,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def _numero_vinculacion():
-    count = Cliente.objects.exclude(numero_vinculacion__isnull=True).count()
-    return f"VIN-{count + 1:04d}"
+    return siguiente(Cliente, "VIN-", campo="numero_vinculacion")
 
 
 def _generar_pdf(cliente):

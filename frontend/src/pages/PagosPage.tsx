@@ -206,7 +206,7 @@ export function PagosPage() {
                   <td><span className="badge" style={{ background: `${ESTADO[p.estado].color}1f`, color: ESTADO[p.estado].color }}>{ESTADO[p.estado].label}</span></td>
                   <td className="der nowrap">{pesos(n(p.monto))}</td>
                   <td>{p.referencia ?? "—"}{p.notas && <span className="pg-sub">{p.notas}</span>}</td>
-                  <td className="pg-sub-celda">{p.creado_por_username}<span className="pg-sub">{new Date(p.created_at).toLocaleDateString("es-CO")}</span></td>
+                  <td className="pg-sub-celda">{p.creado_por_nombre}<span className="pg-sub">{new Date(p.created_at).toLocaleDateString("es-CO")}</span></td>
                   <td className="pg-acciones-fila">
                     {p.comprobante_path
                       ? <button className="btn-ghost" title="Ver archivo" onClick={() => verArchivo(p)}><Icon name="attach_file" size={16} /></button>
@@ -280,9 +280,9 @@ export function PagosPage() {
       <section className="card pg-seccion">
         <h2>Historial</h2>
         <table className="table-sharp">
-          <thead><tr><th>Fecha</th><th>Cotización</th><th>Tipo</th><th className="der">Monto</th><th>Estado</th><th /></tr></thead>
+          <thead><tr><th>Fecha</th><th>Cotización</th><th>Tipo</th><th className="der">Monto</th><th>Estado</th><th>Responsable</th><th /></tr></thead>
           <tbody>
-            {isLoading && <tr><td colSpan={6} className="pg-vacio">Cargando…</td></tr>}
+            {isLoading && <tr><td colSpan={7} className="pg-vacio">Cargando…</td></tr>}
             {pagos?.map(p => (
               <tr key={p.id}>
                 <td className="nowrap">{new Date(p.fecha_pago ?? p.created_at).toLocaleDateString("es-CO")}</td>
@@ -293,12 +293,23 @@ export function PagosPage() {
                   <span className="badge" style={{ background: `${ESTADO[p.estado].color}1f`, color: ESTADO[p.estado].color }}>{ESTADO[p.estado].label}</span>
                   {p.motivo_rechazo && <span className="pg-sub">{p.motivo_rechazo}</span>}
                 </td>
+                <td className="pg-sub-celda">
+                  {p.aprobado_por_nombre ? (
+                    <>
+                      <span title={p.fecha_aprobacion ? new Date(p.fecha_aprobacion).toLocaleString("es-CO") : ""}>
+                        {p.estado === "rechazado" ? "Rechazó" : "Aprobó"}: <strong>{p.aprobado_por_nombre}</strong>
+                      </span>
+                      {p.fecha_aprobacion && <span className="pg-sub">{new Date(p.fecha_aprobacion).toLocaleDateString("es-CO")}</span>}
+                    </>
+                  ) : <span className="pg-sub">{p.estado === "pendiente" || p.estado === "por_confirmar" ? "Por revisar" : "Sin responsable registrado"}</span>}
+                  <span className="pg-sub">Registró: {p.creado_por_nombre ?? "—"}</span>
+                </td>
                 <td className="pg-acciones-fila">
                   {p.comprobante_path && <button className="btn-ghost" title="Ver archivo" onClick={() => verArchivo(p)}><Icon name="attach_file" size={16} /></button>}
                 </td>
               </tr>
             ))}
-            {!isLoading && pagos?.length === 0 && <tr><td colSpan={6} className="pg-vacio">Sin pagos registrados.</td></tr>}
+            {!isLoading && pagos?.length === 0 && <tr><td colSpan={7} className="pg-vacio">Sin pagos registrados.</td></tr>}
           </tbody>
         </table>
       </section>

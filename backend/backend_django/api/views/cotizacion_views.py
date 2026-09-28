@@ -14,6 +14,7 @@ from api.models import (
 from services.notas_cotizacion import NOTAS_ACLARATORIAS, CLAVES as CLAVES_NOTAS
 from api.serializers import CotizacionSerializer
 from api.permissions import Requiere
+from api.numeracion import siguiente_anual
 from services.pdf_service import generate_cotizacion
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,7 @@ def _numero_cotizacion():
     hecha a mano fue la 159, se pone 159 y la primera del sistema sale 160).
     Las cotizaciones viejas con formato COT-0001 no entran en la cuenta.
     """
-    anio = timezone.localdate().year
-    del_anio = Cotizacion.objects.filter(numero__endswith=f"-{anio}").count()
-    return f"{settings.COTIZACION_CONSECUTIVO_INICIAL + del_anio + 1}-{anio}"
+    return siguiente_anual(Cotizacion, timezone.localdate().year, settings.COTIZACION_CONSECUTIVO_INICIAL)
 
 
 def _etiqueta_ajuste(ajuste):
@@ -272,6 +271,15 @@ class CotizacionListCreateView(APIView):
         return Response(CotizacionSerializer(cotizacion).data, status=201)
 
 
+def _bloqueo_por_pagos_u_ordenes(cotizacion, accion):
+    """Mensaje si la cotización ya tiene pagos vivos u órdenes; None si se puede tocar."""
+    if cotizacion.ordenes_suministro.exists():
+        return f"No se puede {accion}: ya tiene órdenes de suministro. Anúlalas primero."
+    if cotizacion.pagos.exclude(estado="rechazado").exists():
+        return f"No se puede {accion}: ya tiene pagos u órdenes de compra registrados."
+    return None
+
+
 class CotizacionDetailView(APIView):
     permission_classes = [Requiere(LEER_COTIZACIONES, ("cotizaciones",))]
     def get_object(self, cotizacion_id):
@@ -282,6 +290,82 @@ class CotizacionDetailView(APIView):
         if not cotizacion:
             return Response({"detail": "No encontrada"}, status=404)
         return Response(CotizacionSerializer(cotizacion).data)
+
+    def put(self, request, cotizacion_id):
+        """Reemplaza líneas, cargos/descuentos, tarifa y notas. Mismo cuerpo que el POST.
+
+        Pendiente de aprobación: se edita tal cual. Aprobada sin pagos ni
+        órdenes: se edita y VUELVE a pendiente de aprobación, porque lo
+        aprobado ya no es lo mismo. Rechazada: no (se arma una nueva).
+        """
+        cotizacion = self.get_object(cotizacion_id)
+        if not cotizacion:
+            return Response({"detail": "No encontrada"}, status=404)
+        if cotizacion.estado == "rechazada":
+            return Response({"detail": "Una cotización rechazada no se edita: arma una nueva."}, status=400)
+        bloqueo = _bloqueo_por_pagos_u_ordenes(cotizacion, "editar")
+        if bloqueo:
+            return Response({"detail": bloqueo}, status=400)
+
+        d = request.data
+        planta = Planta.objects.filter(id=d.get("planta") or cotizacion.planta_id).first()
+        if not planta:
+            return Response({"detail": "Planta no encontrada"}, status=404)
+        if not d.get("items"):
+            return Response({"detail": "La cotización debe tener al menos un ítem"}, status=400)
+        tipo_precio = d.get("tipo_precio") or cotizacion.tipo_precio
+        try:
+            lineas = _validar_lineas(d["items"], planta, tipo_precio)
+            ajustes = _validar_ajustes(d.get("ajustes") or [])
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
+        notas_elegidas = d.get("notas_aclaratorias")
+        if notas_elegidas is not None:
+            notas_elegidas = [c for c in notas_elegidas if c in CLAVES_NOTAS]
+
+        estaba_aprobada = cotizacion.estado == "aprobada"
+        with transaction.atomic():
+            cotizacion.items.all().delete()
+            cotizacion.ajustes.all().delete()
+            for ln in lineas:
+                CotizacionItem.objects.create(cotizacion=cotizacion, **ln)
+            for orden, aj in enumerate(ajustes):
+                CotizacionAjuste.objects.create(cotizacion=cotizacion, orden=orden, **aj)
+            cotizacion.planta = planta
+            cotizacion.tipo_precio = tipo_precio
+            cotizacion.notas = (d.get("notas") or "").strip() or None
+            cotizacion.notas_aclaratorias = notas_elegidas
+            if estaba_aprobada:
+                cotizacion.estado = "pendiente_aprobacion"
+                cotizacion.aprobado_por = None
+                cotizacion.fecha_aprobacion = None
+            cotizacion.save()
+        Seguimiento.objects.create(
+            solicitud=cotizacion.solicitud, tipo="nota", usuario=request.user,
+            texto=f"Cotización {cotizacion.numero} editada."
+                  + (" Vuelve a quedar pendiente de aprobación." if estaba_aprobada else ""),
+        )
+        cotizacion = self.get_object(cotizacion_id)
+        _generar_pdf(cotizacion)
+        return Response(CotizacionSerializer(self.get_object(cotizacion_id)).data)
+
+    def delete(self, request, cotizacion_id):
+        """Borra la cotización y la solicitud vuelve a quedar por cotizar."""
+        cotizacion = self.get_object(cotizacion_id)
+        if not cotizacion:
+            return Response({"detail": "No encontrada"}, status=404)
+        bloqueo = _bloqueo_por_pagos_u_ordenes(cotizacion, "eliminar")
+        if bloqueo:
+            return Response({"detail": bloqueo}, status=400)
+        solicitud, numero = cotizacion.solicitud, cotizacion.numero
+        with transaction.atomic():
+            cotizacion.delete()
+            quedan_rechazadas = solicitud.cotizaciones.filter(estado="rechazada").exists()
+            solicitud.estado = "en_seguimiento" if quedan_rechazadas else "pendiente"
+            solicitud.save(update_fields=["estado"])
+        Seguimiento.objects.create(solicitud=solicitud, tipo="nota", usuario=request.user,
+                                   texto=f"Cotización {numero} eliminada.")
+        return Response(status=204)
 
 
 class CotizacionAprobarView(APIView):

@@ -6,6 +6,7 @@ import { getPlantas, createPlanta, setPlantaActiva, actualizarPlanta } from "../
 import { getMateriales, createMaterial } from "../api/materiales";
 import { Icon } from "../components/ui/Icon";
 import { PreciosPorPlanta } from "../components/PreciosPorPlanta";
+import { CatalogoMateriales } from "../components/CatalogoMateriales";
 import type { MaterialTipo, Planta } from "../types";
 
 export function AdminPage() {
@@ -125,7 +126,8 @@ export function AdminPage() {
       <section className="card" style={{ padding: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 4px" }}>Catálogo de materiales</h2>
         <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
-          {materiales?.length ?? 0} materiales. Después de crear uno, asígnale precio en la planta que lo vende.
+          {materiales?.length ?? 0} materiales. Estos nombres son los que salen en solicitudes, cotizaciones y disponibilidad.
+          Si dos nombres son el mismo material, únelos para que quede uno solo.
         </p>
         <form
           style={{ display: "flex", gap: 8, marginBottom: 14 }}
@@ -141,6 +143,7 @@ export function AdminPage() {
           <button type="submit" className="btn-primary"><Icon name="add" size={16} />Agregar</button>
         </form>
 
+        <CatalogoMateriales materiales={materiales ?? []} plantas={plantas ?? []} />
       </section>
     </div>
   );

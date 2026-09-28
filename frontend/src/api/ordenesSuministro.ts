@@ -46,6 +46,8 @@ export async function notificarOrdenSuministro(id: number, canales: ("whatsapp" 
 /** Datos de retiro que se conocen después de emitida la orden. Regenera el PDF. */
 export async function actualizarOrdenSuministro(id: number, data: {
   fecha_suministro?: string | null; placas_empresa?: string; placas_cliente?: string; notas?: string; obra?: string;
+  /** Solo con permiso "ordenes": reemplaza las cantidades de la orden. */
+  items?: { cotizacion_item: number; cantidad: number }[];
 }): Promise<OrdenSuministro> {
   const res = await client.patch(`/ordenes-suministro/${id}/`, data);
   return res.data;

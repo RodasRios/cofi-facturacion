@@ -8,6 +8,7 @@ from api.models import Despacho, DespachoItem, OrdenSuministro, Material
 from api.serializers import DespachoSerializer
 from rest_framework.parsers import MultiPartParser, FormParser
 from api.permissions import Requiere, plantas_de
+from api.numeracion import siguiente
 
 LEER_DESPACHOS = ("despachos", "ordenes")
 from services.pdf_service import generate_despacho
@@ -16,8 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _numero_despacho():
-    count = Despacho.objects.count()
-    return f"REM-{count + 1:04d}"
+    return siguiente(Despacho, "REM-")
 
 
 def _pdf_items(despacho):

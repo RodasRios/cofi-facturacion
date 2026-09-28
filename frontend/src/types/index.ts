@@ -307,10 +307,13 @@ export interface Pago {
   estado_display: string;
   aprobado_por: number | null;
   aprobado_por_username: string | null;
+  /** Responsable: quien aprobó, rechazó o confirmó el pago. */
+  aprobado_por_nombre: string | null;
   fecha_aprobacion: string | null;
   motivo_rechazo: string | null;
   creado_por: number | null;
   creado_por_username: string | null;
+  creado_por_nombre: string | null;
   created_at: string;
 }
 

@@ -341,6 +341,10 @@ class PagoSerializer(serializers.ModelSerializer):
     aprobado_por_username = serializers.CharField(source="aprobado_por.username", read_only=True)
     creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
     tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    # Quién aprobó (o rechazó / confirmó) y quién registró, con su nombre real:
+    # es el responsable que queda del pago.
+    aprobado_por_nombre = serializers.SerializerMethodField()
+    creado_por_nombre = serializers.SerializerMethodField()
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
 
     class Meta:
@@ -348,10 +352,19 @@ class PagoSerializer(serializers.ModelSerializer):
         fields = [
             "id", "cotizacion", "cotizacion_numero", "cliente_nombre", "tipo", "tipo_display",
             "monto", "referencia", "fecha_pago", "notas", "comprobante_path",
-            "estado", "estado_display", "aprobado_por", "aprobado_por_username", "fecha_aprobacion",
-            "motivo_rechazo", "creado_por", "creado_por_username", "created_at",
+            "estado", "estado_display", "aprobado_por", "aprobado_por_username", "aprobado_por_nombre",
+            "fecha_aprobacion", "motivo_rechazo", "creado_por", "creado_por_username", "creado_por_nombre",
+            "created_at",
         ]
         read_only_fields = ["estado", "creado_por", "aprobado_por", "fecha_aprobacion", "comprobante_path"]
+
+    def get_aprobado_por_nombre(self, obj):
+        u = obj.aprobado_por
+        return (u.nombre or u.username) if u else None
+
+    def get_creado_por_nombre(self, obj):
+        u = obj.creado_por
+        return (u.nombre or u.username) if u else None
 
 
 class OrdenSuministroItemSerializer(serializers.ModelSerializer):

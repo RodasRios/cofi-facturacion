@@ -28,6 +28,7 @@ from rest_framework.response import Response
 from api.models import OrdenSuministro, OrdenSuministroItem, Cotizacion, CotizacionItem, Planta, Seguimiento
 from api.serializers import OrdenSuministroSerializer, CotizacionSerializer
 from api.permissions import Requiere, plantas_de, tiene
+from api.numeracion import siguiente
 from services.pdf_service import generate_orden_suministro
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ LEER_ORDENES = ("ordenes", "despachos")
 
 
 def _numero_orden():
-    return f"OS-{OrdenSuministro.objects.count() + 1:04d}"
+    return siguiente(OrdenSuministro, "OS-")
 
 
 def _placas(texto):
@@ -152,8 +153,12 @@ def _ordenes_qs(user):
     return qs.filter(planta_id__in=limitadas) if limitadas is not None else qs
 
 
-def _validar_items(cotizacion, planta, items):
-    """[(cotizacion_item, cantidad)] validados contra el saldo por ordenar."""
+def _validar_items(cotizacion, planta, items, excluir_orden=None):
+    """[(cotizacion_item, cantidad)] validados contra el saldo por ordenar.
+
+    Al editar una orden, lo que ella misma ya tenía no cuenta como ordenado
+    (`excluir_orden`), para poder subir o bajar su cantidad.
+    """
     if not items:
         raise ValueError("La orden debe tener al menos un material.")
     lineas = {i.id: i for i in cotizacion.items.select_related("material", "planta")}
@@ -170,7 +175,10 @@ def _validar_items(cotizacion, planta, items):
             raise ValueError(f"La cantidad de {ci.material.nombre} no es un número.")
         if cantidad <= 0:
             continue
-        saldo = ci.cantidad - sum((oi.cantidad for oi in ci.ordenes_items.all()), Decimal("0"))
+        saldo = ci.cantidad - sum(
+            (oi.cantidad for oi in ci.ordenes_items.all() if oi.orden_id != excluir_orden),
+            Decimal("0"),
+        )
         if cantidad > saldo:
             raise ValueError(
                 f"De {ci.material.nombre} quedan {_cantidad(saldo)} {ci.material.unidad_medida} por ordenar."
@@ -277,15 +285,64 @@ class OrdenSuministroDetailView(APIView):
         return Response(_con_extras(orden, request))
 
     def patch(self, request, orden_id):
+        """Corregir la orden: datos de retiro y, con permiso "ordenes", las cantidades.
+
+        Si cambia algo que la planta necesita saber (material, fecha, placas)
+        y ya se le había avisado, la orden vuelve a "por notificar".
+        """
         orden = _ordenes_qs(request.user).filter(id=orden_id).first()
         if not orden:
             return Response({"detail": "No encontrada"}, status=404)
-        for k in CAMPOS_EDITABLES:
-            if k in request.data:
-                v = request.data[k]
-                setattr(orden, k, (v.strip() if isinstance(v, str) else v) or None)
-        orden.save()
+        d = request.data
+        antes = (orden.fecha_suministro, orden.placas_empresa, orden.placas_cliente,
+                 sorted((i.cotizacion_item_id, i.cantidad) for i in orden.items.all()))
+
+        lineas = None
+        if "items" in d:
+            if not tiene(request.user, "ordenes"):
+                return Response({"detail": "Solo quien emite órdenes puede cambiar las cantidades."}, status=403)
+            try:
+                lineas = _validar_items(orden.cotizacion, orden.planta, d.get("items") or [], excluir_orden=orden.id)
+            except ValueError as e:
+                return Response({"detail": str(e)}, status=400)
+            # No se puede dejar por debajo de lo que ya salió de la planta.
+            nuevo_por_material = {}
+            for ci, c in lineas:
+                nuevo_por_material[ci.material_id] = nuevo_por_material.get(ci.material_id, Decimal("0")) + c
+            for oi in orden.items.all():
+                mid = oi.cotizacion_item.material_id
+                despachado = orden.cantidad_despachada(mid)
+                if despachado > nuevo_por_material.get(mid, Decimal("0")):
+                    return Response({
+                        "detail": f"Ya se despacharon {_cantidad(despachado)} {oi.cotizacion_item.material.unidad_medida} "
+                                  f"de {oi.cotizacion_item.material.nombre}; la orden no puede quedar por debajo.",
+                    }, status=400)
+
+        with transaction.atomic():
+            for k in CAMPOS_EDITABLES:
+                if k in d:
+                    v = d[k]
+                    setattr(orden, k, (v.strip() if isinstance(v, str) else v) or None)
+            orden.save()
+            if lineas is not None:
+                orden.items.all().delete()
+                OrdenSuministroItem.objects.bulk_create([
+                    OrdenSuministroItem(orden=orden, cotizacion_item=ci, cantidad=c) for ci, c in lineas
+                ])
+
         orden = _ordenes_qs(request.user).get(id=orden.id)
+        despues = (orden.fecha_suministro, orden.placas_empresa, orden.placas_cliente,
+                   sorted((i.cotizacion_item_id, i.cantidad) for i in orden.items.all()))
+        cambio_para_planta = antes != despues
+        if cambio_para_planta:
+            texto = f"Orden de suministro {orden.numero} modificada."
+            if orden.notificada_planta:
+                orden.notificada_planta = False
+                orden.canales_notificacion = []
+                orden.save(update_fields=["notificada_planta", "canales_notificacion"])
+                texto += " Hay que volver a avisar a la planta."
+            Seguimiento.objects.create(solicitud=orden.cotizacion.solicitud, tipo="nota",
+                                       usuario=request.user, texto=texto)
         _generar_pdf(orden)
         return Response(_con_extras(orden, request))
 

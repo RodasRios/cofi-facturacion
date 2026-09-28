@@ -2,7 +2,7 @@ from django.urls import path
 from api.views.auth_views import LoginView, MeView, UserFirmaView, PerfilView, CambiarPasswordView
 from api.views.user_views import UserListCreateView, UserDetailView
 from api.views.planta_views import PlantaListCreateView, PlantaDetailView
-from api.views.material_views import MaterialListCreateView, MaterialDetailView, MaterialPrecioView
+from api.views.material_views import MaterialListCreateView, MaterialDetailView, MaterialPrecioView, MaterialUnirView
 from api.views.cliente_views import ClienteListCreateView, ClienteDetailView, ClientePdfView
 from api.views.cliente_token_views import (
     ClienteTokenListCreateView, ClienteTokenRevocarView, VinculacionPublicaView,
@@ -53,6 +53,7 @@ urlpatterns += p("plantas/<int:planta_id>/", PlantaDetailView.as_view())
 
 # Materiales
 urlpatterns += p("materiales/<int:material_id>/precios/", MaterialPrecioView.as_view())
+urlpatterns += p("materiales/<int:material_id>/unir/", MaterialUnirView.as_view())
 urlpatterns += p("materiales/<int:material_id>/", MaterialDetailView.as_view())
 urlpatterns += p("materiales/", MaterialListCreateView.as_view())
 

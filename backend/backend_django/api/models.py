@@ -122,7 +122,7 @@ class Material(models.Model):
 
 TIPO_PRECIO_CHOICES = [
     ("especial", "Venta especial"),
-    ("detal", "Venta página / clientes detal"),
+    ("detal", "Venta detal"),
 ]
 
 # El IVA que aplica hoy a estos materiales. Se guarda una copia en cada

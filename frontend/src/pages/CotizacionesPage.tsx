@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getCotizaciones, aprobarCotizacion } from "../api/cotizaciones";
+import { getCotizaciones, aprobarCotizacion, eliminarCotizacion } from "../api/cotizaciones";
+import { mensajeError } from "../lib/errores";
 import { getSolicitudes } from "../api/solicitudes";
 import { useAuth } from "../contexts/AuthContext";
 import { Icon } from "../components/ui/Icon";
@@ -10,7 +11,13 @@ import { NuevaCotizacion } from "../components/NuevaCotizacion";
 import { pesos } from "../lib/cotizacion";
 import { MiFirma } from "../components/MiFirma";
 import { puede } from "../lib/permisos";
-import type { CotizacionEstado } from "../types";
+import type { Cotizacion, CotizacionEstado } from "../types";
+
+/** Editable/borrable mientras no tenga plata ni órdenes encima; una rechazada no se edita. */
+function tocable(c: Cotizacion) {
+  const conPagos = Number(c.total_pagado) + Number(c.total_en_revision) + Number(c.total_por_confirmar) > 0;
+  return !conPagos && !c.tiene_orden_suministro;
+}
 
 const ESTADO_LABEL: Record<CotizacionEstado, string> = {
   pendiente_aprobacion: "Pendiente de aprobación",
@@ -40,6 +47,15 @@ export function CotizacionesPage() {
   const [pdfViewer, setPdfViewer] = useState<{ url: string; filename: string } | null>(null);
 
   const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState<Cotizacion | null>(null);
+  const eliminarMut = useMutation({
+    mutationFn: (c: Cotizacion) => eliminarCotizacion(c.id),
+    onSuccess: () => {
+      ["cotizaciones", "solicitudes", "tablero"].forEach(k => qc.invalidateQueries({ queryKey: [k] }));
+      toast.success("Cotización eliminada — la solicitud vuelve a quedar por cotizar");
+    },
+    onError: e => toast.error(mensajeError(e, "No se pudo eliminar la cotización")),
+  });
   const aprobarMut = useMutation({
     mutationFn: ({ id, aprobar }: { id: number; aprobar: boolean }) => aprobarCotizacion(id, aprobar),
     onSuccess: () => {
@@ -56,7 +72,7 @@ export function CotizacionesPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Cotizaciones</h1>
         {puedeArmar && (
-          <button className="btn-primary" onClick={() => setShowForm(v => !v)}>
+          <button className="btn-primary" onClick={() => { setEditando(null); setShowForm(v => !v); }}>
             <Icon name="add" size={16} />Nueva cotización
           </button>
         )}
@@ -64,7 +80,17 @@ export function CotizacionesPage() {
 
       {puedeArmar && !user?.firma_path && <MiFirma />}
 
-      {showForm && (
+      {editando && (
+        <NuevaCotizacion
+          key={`editar-${editando.id}`}
+          solicitudes={[]}
+          editar={editando}
+          onCreada={() => setEditando(null)}
+          onCancelar={() => setEditando(null)}
+        />
+      )}
+
+      {showForm && !editando && (
         <NuevaCotizacion
           solicitudes={solicitudes}
           onCreada={() => setShowForm(false)}
@@ -121,6 +147,18 @@ export function CotizacionesPage() {
                     {c.pdf_path && (
                       <button className="btn-ghost" title="Ver PDF" onClick={() => setPdfViewer({ url: `/cotizaciones/${c.id}/pdf/`, filename: `${c.numero}.pdf` })}>
                         <Icon name="picture_as_pdf" size={16} />
+                      </button>
+                    )}
+                    {puedeArmar && c.estado !== "rechazada" && tocable(c) && (
+                      <button className="btn-ghost" title={c.estado === "aprobada" ? "Editar (vuelve a aprobación)" : "Editar"}
+                        onClick={() => { setShowForm(false); setEditando(c); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+                        <Icon name="edit" size={16} />
+                      </button>
+                    )}
+                    {puedeArmar && tocable(c) && (
+                      <button className="btn-ghost" title="Eliminar" style={{ color: "#dc2626" }}
+                        onClick={() => confirm(`¿Eliminar la cotización ${c.numero}? La solicitud volverá a quedar por cotizar.`) && eliminarMut.mutate(c)}>
+                        <Icon name="delete" size={16} />
                       </button>
                     )}
                     {puedeAprobar && c.estado === "pendiente_aprobacion" && (

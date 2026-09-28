@@ -15,6 +15,12 @@ export const PERMISOS: { clave: Permiso; pestana: string; desc: string }[] = [
   { clave: "precios", pestana: "Plantas y precios", desc: "Editar plantas, materiales y precios" },
 ];
 
+/**
+ * Ni un administrador los tiene por serlo: hay que marcarlos a propósito
+ * (api/permissions.py::EXCLUSIVOS). Aprobar pagos es solo de financiera.
+ */
+export const EXCLUSIVOS: Permiso[] = ["aprobar_pagos"];
+
 /** Plantillas para no marcar casilla por casilla al crear un usuario. */
 export const PLANTILLAS: { nombre: string; permisos: Permiso[] }[] = [
   { nombre: "Comercial", permisos: ["tablero", "clientes", "solicitudes", "cotizaciones", "pagos", "ordenes"] },
@@ -23,13 +29,12 @@ export const PLANTILLAS: { nombre: string; permisos: Permiso[] }[] = [
   { nombre: "Órdenes", permisos: ["ordenes"] },
   { nombre: "Despacho", permisos: ["despachos"] },
   { nombre: "Disponibilidad", permisos: ["disponibilidad"] },
-  { nombre: "Todo", permisos: PERMISOS.map(p => p.clave).filter(c => c !== "precios") },
+  { nombre: "Todo menos aprobar pagos", permisos: PERMISOS.map(p => p.clave).filter(c => c !== "precios" && !EXCLUSIVOS.includes(c)) },
 ];
 
 export function puede(user: User | null | undefined, ...claves: Permiso[]): boolean {
   if (!user) return false;
-  if (user.is_admin) return true;
-  return claves.some(c => user.permisos.includes(c));
+  return claves.some(c => user.permisos.includes(c) || (user.is_admin && !EXCLUSIVOS.includes(c)));
 }
 
 export const NAV: { path: string; icon: string; label: string; permisos: Permiso[] }[] = [
