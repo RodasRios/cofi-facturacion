@@ -24,7 +24,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="app-header">
         <div className="header-left">
           <Link to={rutaInicial(user)} className="logo-link">
-            <img src="/logo.svg" alt="" style={{ height: 26, width: 26 }} />
+            <img src="/cofi-logo.svg" alt="" style={{ height: 26, width: 26 }} />
             <span className="logo-text">Facturación</span>
           </Link>
 

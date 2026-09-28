@@ -44,7 +44,7 @@ export function PedidoPublicoPage() {
 
       <div className="ped-panel">
         <div className="ped-brand">
-          <img src="/logo.svg" alt="" className="ped-logo" />
+          <img src="/cofi-logo.svg" alt="" className="ped-logo" />
           <div>
             <h1 className="ped-title">Solicitud de cotización</h1>
             <p className="ped-subtitle">

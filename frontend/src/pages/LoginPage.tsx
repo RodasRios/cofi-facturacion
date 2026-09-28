@@ -39,7 +39,7 @@ export function LoginPage() {
 
       <div className="login-panel">
         <div className="login-brand">
-          <img src="/logo.svg" alt="" className="login-logo" />
+          <img src="/cofi-logo.svg" alt="" className="login-logo" />
           <div>
             <h1 className="login-title">COFI Facturación</h1>
             <p className="login-subtitle">Triturados y Concretos Ltda</p>

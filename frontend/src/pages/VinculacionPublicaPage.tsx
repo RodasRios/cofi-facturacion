@@ -40,7 +40,7 @@ export function VinculacionPublicaPage() {
 
       <div className="vinc-panel">
         <div className="vinc-brand">
-          <img src="/logo.svg" alt="" className="vinc-logo" />
+          <img src="/cofi-logo.svg" alt="" className="vinc-logo" />
           <div>
             <h1 className="vinc-title">Vinculación de cliente</h1>
             <p className="vinc-subtitle">Triturados y Concretos Ltda</p>
