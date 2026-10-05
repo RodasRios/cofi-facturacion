@@ -13,13 +13,29 @@ class LoginSerializer(serializers.Serializer):
 
 
 class UserOutSerializer(serializers.ModelSerializer):
+    # `permisos` son los EFECTIVOS (roles ∪ adicionales): con eso decide el
+    # frontend qué mostrar. Los adicionales guardados van en `permisos_extra`.
+    permisos = serializers.SerializerMethodField()
+    permisos_extra = serializers.ListField(source="permisos", read_only=True)
+    rango = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "nombre", "cedula", "rol", "cargo", "telefono",
             "is_admin", "is_superadmin", "is_active", "debe_cambiar_password",
-            "permisos", "plantas", "firma_path", "last_login", "created_at",
+            "roles", "permisos", "permisos_extra", "rango",
+            "plantas", "firma_path", "last_login", "created_at",
         ]
+
+    def get_permisos(self, obj):
+        from api.permissions import CLAVES, permisos_de
+        efectivos = permisos_de(obj)
+        return [c for c in CLAVES if c in efectivos]
+
+    def get_rango(self, obj):
+        from api.permissions import rango
+        return rango(obj)
 
 
 class UserWriteSerializer(serializers.ModelSerializer):
@@ -34,9 +50,22 @@ class UserWriteSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "username", "email", "nombre", "cedula", "rol", "cargo", "telefono",
-            "is_admin", "is_superadmin", "is_active", "password", "permisos", "plantas",
+            "is_superadmin", "is_active", "password", "roles", "permisos", "plantas",
         ]
         extra_kwargs = {"plantas": {"required": False}}
+
+    def to_internal_value(self, data):
+        # El panel manda los adicionales como `permisos_extra`.
+        if hasattr(data, "get") and "permisos_extra" in data:
+            data = {**data, "permisos": data["permisos_extra"]}
+        return super().to_internal_value(data)
+
+    def validate_roles(self, v):
+        from api.permissions import validar_roles
+        roles, err = validar_roles(v)
+        if err:
+            raise serializers.ValidationError(err)
+        return roles
 
     def validate_permisos(self, v):
         from api.permissions import CLAVES
@@ -64,6 +93,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
         if not password:
             raise serializers.ValidationError({"password": "Asigna una contraseña inicial."})
         user = User(**validated_data)
+        user.is_admin = "admin" in (user.roles or [])
         user.set_password(password)
         # La puso otra persona: que la cambie al entrar.
         user.debe_cambiar_password = True
@@ -77,6 +107,8 @@ class UserWriteSerializer(serializers.ModelSerializer):
         plantas = validated_data.pop("plantas", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if "roles" in validated_data:
+            instance.is_admin = "admin" in instance.roles
         if password:
             instance.set_password(password)
             instance.debe_cambiar_password = True

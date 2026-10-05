@@ -33,8 +33,11 @@ class User(models.Model):
     cargo = models.CharField(max_length=120, blank=True, null=True)
     telefono = models.CharField(max_length=40, blank=True, null=True)
     cedula = models.CharField(max_length=30, blank=True, null=True)
-    # Pestañas y acciones que puede usar (claves de api.permissions.PERMISOS).
-    # Un admin las tiene todas sin importar esta lista.
+    # Puestos (claves de api.permissions.ROLES): deciden qué puede hacer.
+    # Un nivel de administración va solo; los puestos se combinan.
+    roles = models.JSONField(default=list, blank=True)
+    # Permisos ADICIONALES a los de sus roles (ajuste fino por persona). Los
+    # efectivos salen de api.permissions.permisos_de(); no leer este campo solo.
     permisos = models.JSONField(default=list, blank=True)
     # Si tiene plantas asignadas, solo ve y trabaja las órdenes, despachos y
     # disponibilidad de esas plantas. Vacío = todas.
@@ -46,7 +49,14 @@ class User(models.Model):
         db_table = "users"
 
     def save(self, *args, **kwargs):
+        # is_admin y el rol Administrador nivel 1 son la misma cosa: se
+        # mantienen juntos. Quien quite el rol debe bajar también is_admin
+        # (lo hace user_views.aplicar_roles).
         if self.is_superadmin:
+            self.is_admin = True
+        if self.is_admin:
+            self.roles = ["admin"]
+        elif "admin" in (self.roles or []):
             self.is_admin = True
         super().save(*args, **kwargs)
 

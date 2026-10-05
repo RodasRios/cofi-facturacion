@@ -1,6 +1,6 @@
 from django.urls import path
 from api.views.auth_views import LoginView, MeView, UserFirmaView, PerfilView, CambiarPasswordView
-from api.views.user_views import UserListCreateView, UserDetailView
+from api.views.user_views import UserListCreateView, UserDetailView, PanelUsuariosView
 from api.views.planta_views import PlantaListCreateView, PlantaDetailView
 from api.views.material_views import MaterialListCreateView, MaterialDetailView, MaterialPrecioView, MaterialUnirView
 from api.views.cliente_views import ClienteListCreateView, ClienteDetailView, ClientePdfView
@@ -46,6 +46,7 @@ urlpatterns += p("auth/cambiar-password", CambiarPasswordView.as_view())
 # Usuarios (admin)
 urlpatterns += p("users/", UserListCreateView.as_view())
 urlpatterns += p("users/<int:user_id>/", UserDetailView.as_view())
+urlpatterns += p("users/panel/", PanelUsuariosView.as_view())
 
 # Plantas
 urlpatterns += p("plantas/", PlantaListCreateView.as_view())

@@ -2,7 +2,12 @@ export type Rol = "comercial" | "aprobador" | "financiera" | "planta";
 
 export type Permiso =
   | "tablero" | "clientes" | "solicitudes" | "cotizaciones" | "aprobar_cotizaciones"
-  | "pagos" | "aprobar_pagos" | "ordenes" | "despachos" | "disponibilidad" | "precios";
+  | "pagos" | "aprobar_pagos" | "ordenes" | "despachos" | "disponibilidad" | "precios" | "usuarios";
+
+/** Claves de api/permissions.py::ROLES. */
+export type RolClave =
+  | "admin" | "coordinador" | "comercial" | "aprobador" | "financiera"
+  | "logistica" | "despacho" | "disponibilidad";
 
 export interface User {
   id: number;
@@ -20,8 +25,14 @@ export interface User {
   is_active: boolean;
   /** La contraseña la puso otra persona: se pide cambiarla al entrar. */
   debe_cambiar_password: boolean;
-  /** Pestañas y acciones permitidas. Un admin las tiene todas. */
+  /** Puestos: deciden qué puede hacer. Un nivel de administración va solo. */
+  roles: RolClave[];
+  /** Permisos EFECTIVOS (roles ∪ adicionales), calculados por el servidor. */
   permisos: Permiso[];
+  /** Permisos adicionales a los de sus roles (ajuste fino). */
+  permisos_extra: Permiso[];
+  /** 3 superusuario, 2 admin nivel 1, 1 nivel 2, 0 puestos. Solo se gestiona hacia abajo. */
+  rango: number;
   /** Plantas asignadas (órdenes, despachos, disponibilidad). Vacío = todas. */
   plantas: number[];
   firma_path: string | null;
@@ -152,6 +163,8 @@ export interface FilaTablero {
   etapa: EtapaFlujo;
   etapa_titulo: string;
   responsable: Rol | null;
+  /** A quién le toca, por puesto (o quien tenga el permiso si nadie lo tiene). */
+  responsables: { id: number; nombre: string }[];
   desde: string;
   dias_en_etapa: number;
   cotizacion_numero: string | null;

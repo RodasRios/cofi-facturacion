@@ -17,6 +17,7 @@ import { OrdenesSuministroPage } from "./pages/OrdenesSuministroPage";
 import { DespachosPage } from "./pages/DespachosPage";
 import { AdminPage } from "./pages/AdminPage";
 import { ConfiguracionPage } from "./pages/ConfiguracionPage";
+import { UsuariosPage } from "./pages/UsuariosPage";
 import { PrimerIngresoPage } from "./pages/PrimerIngresoPage";
 
 function Shell({ children, permisos }: { children: React.ReactNode; permisos?: Permiso[] }) {
@@ -51,6 +52,7 @@ export default function App() {
       <Route path="/admin" element={<Shell permisos={["precios"]}><AdminPage /></Shell>} />
       <Route path="/disponibilidad" element={<Shell permisos={["disponibilidad"]}><DisponibilidadPage /></Shell>} />
       <Route path="/configuracion" element={<Shell><ConfiguracionPage /></Shell>} />
+      <Route path="/usuarios" element={<Shell permisos={["usuarios"]}><UsuariosPage /></Shell>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

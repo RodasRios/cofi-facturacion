@@ -7,7 +7,7 @@ quedar desincronizado de la realidad.
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from api.permissions import Requiere
+from api.permissions import Requiere, equipo, responsables
 
 from collections import defaultdict
 from decimal import Decimal
@@ -26,6 +26,19 @@ ETAPAS = {
     "pendiente_notificacion":    ("Por notificar a planta",        "comercial"),
     "pendiente_despacho":        ("Por despachar",                 "planta"),
     "despachada":                ("Despachada",                    None),
+}
+
+# Permiso con el que se resuelve cada etapa: de ahí sale a quién le toca
+# (`permissions.responsables`).
+PERMISO_DE_ETAPA = {
+    "pendiente_cotizacion": "cotizaciones",
+    "en_seguimiento": "cotizaciones",
+    "pendiente_aprobacion": "aprobar_cotizaciones",
+    "pendiente_pago": "pagos",
+    "pendiente_aprobacion_pago": "aprobar_pagos",
+    "pendiente_orden": "ordenes",
+    "pendiente_notificacion": "ordenes",
+    "pendiente_despacho": "despachos",
 }
 
 PREFETCH = (
@@ -100,8 +113,13 @@ class TableroView(APIView):
 
         ahora = timezone.now()
         filas = []
+        gente = equipo()
+        cache_resp = {}
         for s in solicitudes:
             etapa, desde = _etapa_de(s)
+            permiso = PERMISO_DE_ETAPA.get(etapa)
+            if permiso not in cache_resp:
+                cache_resp[permiso] = responsables(permiso, gente) if permiso else []
             titulo, responsable = ETAPAS[etapa]
             cot = s.cotizacion_vigente
             filas.append({
@@ -111,6 +129,7 @@ class TableroView(APIView):
                 "etapa": etapa,
                 "etapa_titulo": titulo,
                 "responsable": responsable,
+                "responsables": cache_resp[permiso],
                 "desde": desde,
                 "dias_en_etapa": (ahora - desde).days,
                 "cotizacion_numero": cot.numero if cot else None,

@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Icon } from "../components/ui/Icon";
 import { ImageCropper } from "../components/ui/ImageCropper";
 import { useAuth } from "../contexts/AuthContext";
 import { actualizarPerfil, cambiarPassword, uploadFirma, borrarFirma, getFirmaBlob } from "../api/auth";
-import { getUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario, type UsuarioDatos } from "../api/usuarios";
 import { mensajeError } from "../lib/errores";
-import { getPlantas } from "../api/plantas";
-import { EXCLUSIVOS, PERMISOS, PLANTILLAS } from "../lib/permisos";
-import type { Permiso, User } from "../types";
+import { puede } from "../lib/permisos";
 
 
 // ─── Mi cuenta ────────────────────────────────────────────────────────────────
@@ -194,351 +191,20 @@ function MiFirmaSeccion() {
   );
 }
 
-// ─── Usuarios (admin y superusuario) ─────────────────────────────────────────
-
-/** Contraseña temporal legible (sin 0/O ni 1/l) para dictarla o mandarla por chat. */
-function claveTemporal() {
-  const abc = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const n = crypto.getRandomValues(new Uint32Array(10));
-  return Array.from(n, x => abc[x % abc.length]).join("");
-}
-
-const VACIO: UsuarioDatos = {
-  username: "", nombre: "", cedula: "", cargo: "", telefono: "", email: "",
-  is_admin: false, is_superadmin: false, permisos: [], plantas: [],
-};
-
-/** Pestañas agrupadas: cada grupo es una pestaña; sus casillas, lo que puede hacer ahí. */
-const GRUPOS = PERMISOS.reduce<{ pestana: string; permisos: typeof PERMISOS }[]>((acc, p) => {
-  const g = acc.find(x => x.pestana === p.pestana);
-  if (g) g.permisos.push(p); else acc.push({ pestana: p.pestana, permisos: [p] });
-  return acc;
-}, []);
-
-/** Qué necesita plantas asignadas: lo que trabaja la gente de planta. */
-const DE_PLANTA: Permiso[] = ["despachos", "disponibilidad"];
-
-function FormUsuario({ inicial, onCerrar }: { inicial: User | null; onCerrar: () => void }) {
-  const qc = useQueryClient();
-  const { user: yo } = useAuth();
-  const esNuevo = !inicial;
-  const [d, setD] = useState<UsuarioDatos>(() => inicial ? {
-    username: inicial.username, nombre: inicial.nombre ?? "", cedula: inicial.cedula ?? "",
-    cargo: inicial.cargo ?? "", telefono: inicial.telefono ?? "", email: inicial.email ?? "",
-    is_admin: inicial.is_admin, is_superadmin: inicial.is_superadmin,
-    permisos: inicial.permisos, plantas: inicial.plantas,
-  } : { ...VACIO });
-  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: () => getPlantas() });
-  const permisos = d.permisos ?? [];
-  const esAdminForm = !!d.is_admin || !!d.is_superadmin;
-  const togglePermiso = (c: Permiso) =>
-    set("permisos", permisos.includes(c) ? permisos.filter(x => x !== c) : [...permisos, c]);
-  const togglePlanta = (id: number) =>
-    set("plantas", (d.plantas ?? []).includes(id) ? (d.plantas ?? []).filter(x => x !== id) : [...(d.plantas ?? []), id]);
-  const [clave] = useState(claveTemporal);
-  const [creado, setCreado] = useState<{ username: string; clave: string } | null>(null);
-  const set = (k: keyof UsuarioDatos, v: unknown) => setD(x => ({ ...x, [k]: v }));
-  const esYo = inicial?.id === yo?.id;
-
-  const mut = useMutation({
-    mutationFn: () => {
-      const limpio: UsuarioDatos = Object.fromEntries(Object.entries(d).map(([k, v]) =>
-        [k, typeof v === "string" ? (v.trim() || (k === "username" ? "" : null)) : v]));
-      if (!yo?.is_superadmin) { delete limpio.is_admin; delete limpio.is_superadmin; }
-      return esNuevo ? crearUsuario({ ...limpio, password: clave }) : actualizarUsuario(inicial.id, limpio);
-    },
-    onSuccess: u => {
-      qc.invalidateQueries({ queryKey: ["usuarios"] });
-      if (esNuevo) setCreado({ username: u.username, clave });
-      else { toast.success("Usuario actualizado"); onCerrar(); }
-    },
-    onError: e => toast.error(mensajeError(e, "No se pudo guardar el usuario")),
-  });
-
-  if (creado) return <ClaveEntregada titulo="Usuario creado" {...creado} onCerrar={onCerrar} />;
-
-  return (
-    <form className="cfg-panel" onSubmit={e => { e.preventDefault(); mut.mutate(); }}>
-      <div className="cfg-panel-titulo">
-        <h4>{esNuevo ? "Nuevo usuario" : `Editar ${inicial.username}`}</h4>
-        <button type="button" className="btn-ghost" onClick={onCerrar} title="Cerrar"><Icon name="close" size={16} /></button>
-      </div>
-      <div className="cfg-form">
-        <label>Usuario (para entrar)
-          <input className="input-base" value={d.username} onChange={e => set("username", e.target.value)}
-            placeholder="paola.posso" required autoFocus={esNuevo} />
-        </label>
-        <label>Nombre completo<input className="input-base" value={d.nombre ?? ""} onChange={e => set("nombre", e.target.value)} /></label>
-        <label>Cédula<input className="input-base" value={d.cedula ?? ""} onChange={e => set("cedula", e.target.value)} /></label>
-        <label>Cargo<input className="input-base" value={d.cargo ?? ""} onChange={e => set("cargo", e.target.value)} /></label>
-        <label>Teléfono<input className="input-base" value={d.telefono ?? ""} onChange={e => set("telefono", e.target.value)} /></label>
-        <label>Correo<input className="input-base" type="email" value={d.email ?? ""} onChange={e => set("email", e.target.value)} /></label>
-
-        <fieldset className="cfg-ancho cfg-permisos">
-          <legend>
-            Pestañas y permisos
-            {esAdminForm && <small> — un administrador tiene acceso a todo, menos aprobar pagos</small>}
-          </legend>
-          <div className="cfg-plantillas">
-            {!esAdminForm && <span>Plantilla:</span>}
-            {!esAdminForm && PLANTILLAS.map(t => {
-              const igual = t.permisos.length === permisos.length && t.permisos.every(c => permisos.includes(c));
-              return (
-                <button type="button" key={t.nombre} className={igual ? "activo" : ""} onClick={() => set("permisos", [...t.permisos])}>
-                  {t.nombre}
-                </button>
-              );
-            })}
-            {!esAdminForm && <button type="button" onClick={() => set("permisos", [])}>Ninguno</button>}
-          </div>
-          <div className="cfg-grupos">
-            {GRUPOS.map(g => (
-              <div key={g.pestana} className={`cfg-grupo ${g.permisos.some(p => permisos.includes(p.clave)) ? "activo" : ""}`}>
-                <strong>{g.pestana}</strong>
-                {g.permisos.map(p => {
-                  const exclusivo = EXCLUSIVOS.includes(p.clave);
-                  // Al admin se le marcan solos todos menos los exclusivos, que decide quien lo crea.
-                  const heredado = esAdminForm && !exclusivo;
-                  return (
-                    <label key={p.clave} className={heredado ? "heredado" : ""}>
-                      <input type="checkbox" disabled={heredado}
-                        checked={heredado || permisos.includes(p.clave)} onChange={() => togglePermiso(p.clave)} />
-                      <span>{p.desc}{exclusivo && <em className="cfg-exclusivo"> · solo financiera</em>}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </fieldset>
-
-        {!esAdminForm && permisos.some(c => DE_PLANTA.includes(c) || c === "ordenes") && (
-          <fieldset className="cfg-ancho cfg-permisos">
-            <legend>Plantas asignadas <small>— sin marcar ninguna, trabaja con todas</small></legend>
-            <div className="cfg-plantillas">
-              {plantas?.map(p => (
-                <button type="button" key={p.id} className={(d.plantas ?? []).includes(p.id) ? "activo" : ""} onClick={() => togglePlanta(p.id)}>
-                  <Icon name={(d.plantas ?? []).includes(p.id) ? "check_box" : "check_box_outline_blank"} size={14} />
-                  {p.nombre.replace("Planta ", "")}
-                </button>
-              ))}
-            </div>
-            <small className="cfg-meta">Solo verá las órdenes, despachos y disponibilidad de las plantas marcadas.</small>
-          </fieldset>
-        )}
-
-        {yo?.is_superadmin && (
-          <fieldset className="cfg-ancho cfg-privilegios">
-            <legend>Permisos especiales</legend>
-            <label>
-              <input type="checkbox" checked={!!d.is_admin || !!d.is_superadmin} disabled={!!d.is_superadmin || esYo}
-                onChange={e => set("is_admin", e.target.checked)} />
-              <span><strong>Administrador</strong><small>Hace cualquier paso del flujo, maneja plantas, precios y usuarios normales.</small></span>
-            </label>
-            <label>
-              <input type="checkbox" checked={!!d.is_superadmin} disabled={esYo}
-                onChange={e => set("is_superadmin", e.target.checked)} />
-              <span><strong>Superusuario</strong><small>Además crea, edita y elimina administradores.</small></span>
-            </label>
-            {esYo && <small className="cfg-meta">No puedes quitarte tus propios permisos.</small>}
-          </fieldset>
-        )}
-
-        {esNuevo && (
-          <p className="cfg-ancho cfg-meta">
-            <Icon name="key" size={13} /> Se le asigna una contraseña temporal que verás al crear el usuario.
-            Al entrar por primera vez, el sistema le pedirá cambiarla.
-          </p>
-        )}
-      </div>
-      <div className="cfg-acciones" style={{ justifyContent: "flex-end", marginTop: 12 }}>
-        <button type="button" className="btn-secondary" onClick={onCerrar}>Cancelar</button>
-        <button className="btn-primary" disabled={mut.isPending}>
-          <Icon name={esNuevo ? "person_add" : "save"} size={14} />
-          {mut.isPending ? "Guardando…" : esNuevo ? "Crear usuario" : "Guardar cambios"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function ClaveEntregada({ titulo, username, clave, onCerrar }: { titulo: string; username: string; clave: string; onCerrar: () => void }) {
-  const texto = `Usuario: ${username}\nContraseña temporal: ${clave}\nIngresa en ${window.location.origin}`;
-  return (
-    <div className="cfg-panel cfg-clave">
-      <div className="cfg-panel-titulo">
-        <h4><Icon name="check_circle" size={16} /> {titulo}</h4>
-        <button type="button" className="btn-ghost" onClick={onCerrar}><Icon name="close" size={16} /></button>
-      </div>
-      <p>Mándale estos datos. Es la única vez que se muestra la contraseña; al entrar deberá cambiarla.</p>
-      <pre>{texto}</pre>
-      <button className="btn-primary" onClick={() => { navigator.clipboard.writeText(texto); toast.success("Copiado"); }}>
-        <Icon name="content_copy" size={14} />Copiar
-      </button>
-    </div>
-  );
-}
-
-function Usuarios() {
-  const qc = useQueryClient();
-  const { user: yo } = useAuth();
-  const { data: usuarios, isLoading } = useQuery({ queryKey: ["usuarios"], queryFn: getUsuarios });
-  const { data: plantas } = useQuery({ queryKey: ["plantas"], queryFn: () => getPlantas() });
-  const [editando, setEditando] = useState<User | "nuevo" | null>(null);
-  const [clave, setClave] = useState<{ username: string; clave: string } | null>(null);
-  const [verInactivos, setVerInactivos] = useState(false);
-
-  const puedeTocar = (u: User) => yo?.is_superadmin || !(u.is_admin || u.is_superadmin);
-
-  const invalidar = () => qc.invalidateQueries({ queryKey: ["usuarios"] });
-  const activar = useMutation({
-    mutationFn: (u: User) => actualizarUsuario(u.id, { is_active: !u.is_active }),
-    onSuccess: u => { invalidar(); toast.success(u.is_active ? "Usuario activado" : "Usuario desactivado: ya no puede entrar"); },
-    onError: e => toast.error(mensajeError(e, "No se pudo actualizar")),
-  });
-  const restablecer = useMutation({
-    mutationFn: ({ u, clave }: { u: User; clave: string }) => actualizarUsuario(u.id, { password: clave }),
-    onSuccess: (u, { clave }) => { invalidar(); setClave({ username: u.username, clave }); },
-    onError: e => toast.error(mensajeError(e, "No se pudo restablecer la contraseña")),
-  });
-  const eliminar = useMutation({
-    mutationFn: (u: User) => eliminarUsuario(u.id),
-    onSuccess: () => { invalidar(); toast.success("Usuario eliminado"); },
-    onError: (e, u) => {
-      const msg = mensajeError(e, "No se pudo eliminar");
-      // Con documentos a su nombre no se borra: se ofrece desactivarlo.
-      if ((e as { response?: { status?: number } }).response?.status === 409 && u.is_active) {
-        if (confirm(`${msg}\n\n¿Desactivarlo ahora?`)) activar.mutate(u);
-      } else toast.error(msg);
-    },
-  });
-
-  const inactivos = (usuarios ?? []).filter(u => !u.is_active).length;
-  const lista = (usuarios ?? []).filter(u => verInactivos || u.is_active);
-
-  return (
-    <div className="cfg-seccion cfg-seccion-ancha">
-      <header className="cfg-header-fila">
-        <div>
-          <h3>Usuarios</h3>
-          <p>
-            {yo?.is_superadmin
-              ? "Como superusuario puedes crear, editar y eliminar a cualquier usuario, incluidos los administradores."
-              : "Puedes crear y editar usuarios normales. Los administradores solo los modifica el superusuario."}
-          </p>
-        </div>
-        {!editando && (
-          <button className="btn-primary" onClick={() => { setClave(null); setEditando("nuevo"); }}>
-            <Icon name="person_add" size={15} />Nuevo usuario
-          </button>
-        )}
-      </header>
-
-      {clave && <ClaveEntregada titulo="Contraseña restablecida" {...clave} onCerrar={() => setClave(null)} />}
-      {editando && (
-        <FormUsuario key={editando === "nuevo" ? "nuevo" : editando.id}
-          inicial={editando === "nuevo" ? null : editando} onCerrar={() => setEditando(null)} />
-      )}
-
-      <div className="cfg-tabla-wrap">
-        <table className="table-sharp cfg-tabla">
-          <thead>
-            <tr><th>Usuario</th><th>Acceso</th><th>Datos para la firma</th><th>Último ingreso</th><th /></tr>
-          </thead>
-          <tbody>
-            {isLoading && <tr><td colSpan={5} className="cfg-vacio">Cargando…</td></tr>}
-            {lista.map(u => {
-              const pestanas = [...new Set(PERMISOS.filter(p => u.permisos.includes(p.clave)).map(p => p.pestana))];
-              const nombresPlantas = (plantas ?? []).filter(p => u.plantas.includes(p.id)).map(p => p.nombre.replace("Planta ", ""));
-              const esYo = u.id === yo?.id;
-              const tocable = puedeTocar(u);
-              return (
-                <tr key={u.id} className={u.is_active ? "" : "inactivo"}>
-                  <td>
-                    <strong>{u.nombre || u.username}</strong>
-                    <span className="cfg-sub">@{u.username}{esYo && " · tú"}</span>
-                  </td>
-                  <td>
-                    {u.is_superadmin
-                      ? <span className="badge cfg-badge-super">superusuario</span>
-                      : u.is_admin ? <span className="badge cfg-badge-admin">admin{u.permisos.includes("aprobar_pagos") && " · aprueba pagos"}</span>
-                      : pestanas.length ? <span className="cfg-pestanas">{pestanas.join(" · ")}</span>
-                      : <span className="badge cfg-badge-off">sin acceso</span>}
-                    {nombresPlantas.length > 0 && !u.is_admin && <span className="cfg-sub"><Icon name="factory" size={11} /> {nombresPlantas.join(", ")}</span>}
-                    {!u.is_active && <span className="badge cfg-badge-off">inactivo</span>}
-                    {u.debe_cambiar_password && u.is_active && (
-                      <span className="badge cfg-badge-clave" title="Aún no ha cambiado la contraseña temporal">clave temporal</span>
-                    )}
-                  </td>
-                  <td className="cfg-sub-celda">
-                    {[u.cedula && `C.C. ${u.cedula}`, u.cargo, u.telefono, u.email].filter(Boolean).join(" · ") || <em>Sin datos</em>}
-                    <span className="cfg-sub">{u.firma_path ? "✓ Firma cargada" : "Sin firma"}</span>
-                  </td>
-                  <td className="cfg-sub-celda nowrap">
-                    {u.last_login ? new Date(u.last_login).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "Nunca"}
-                  </td>
-                  <td className="cfg-acciones-fila">
-                    {tocable && (
-                      <>
-                        <button className="btn-ghost" title="Editar" onClick={() => { setClave(null); setEditando(u); }}>
-                          <Icon name="edit" size={16} />
-                        </button>
-                        {!esYo && (
-                          <>
-                            <button className="btn-ghost" title="Restablecer contraseña"
-                              onClick={() => confirm(`¿Asignar una contraseña temporal nueva a ${u.username}? La actual deja de servir.`)
-                                && restablecer.mutate({ u, clave: claveTemporal() })}>
-                              <Icon name="lock_reset" size={16} />
-                            </button>
-                            <button className="btn-ghost" title={u.is_active ? "Desactivar (no podrá entrar)" : "Activar"}
-                              onClick={() => activar.mutate(u)}>
-                              <Icon name={u.is_active ? "person_off" : "person_check"} size={16} />
-                            </button>
-                            <button className="btn-ghost" title="Eliminar" style={{ color: "#dc2626" }}
-                              onClick={() => confirm(`¿Eliminar a ${u.username}? No se puede deshacer.`) && eliminar.mutate(u)}>
-                              <Icon name="delete" size={16} />
-                            </button>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {inactivos > 0 && (
-        <button className="btn-ghost" style={{ marginTop: 8, fontSize: 12 }} onClick={() => setVerInactivos(v => !v)}>
-          <Icon name={verInactivos ? "visibility_off" : "visibility"} size={14} />
-          {verInactivos ? "Ocultar inactivos" : `Mostrar inactivos (${inactivos})`}
-        </button>
-      )}
-
-      <p className="cfg-meta" style={{ marginTop: 14 }}>
-        Cada pestaña tiene su permiso. Un <strong>administrador</strong> tiene todas (menos aprobar pagos, que es solo de
-        quien se marque, normalmente financiera), además de plantas, precios y usuarios;
-        el <strong>superusuario</strong> además gestiona administradores.
-      </p>
-    </div>
-  );
-}
-
 // ─── Página ──────────────────────────────────────────────────────────────────
 
-type Tab = "cuenta" | "firma" | "usuarios";
+type Tab = "cuenta" | "firma";
 
 export function ConfiguracionPage() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
-  const esAdmin = !!user?.is_admin;
   const tabs: { key: Tab; icon: string; label: string }[] = [
     { key: "cuenta", icon: "account_circle", label: "Mi cuenta" },
     { key: "firma", icon: "draw", label: "Mi firma" },
-    ...(esAdmin ? [{ key: "usuarios" as Tab, icon: "manage_accounts", label: "Usuarios" }] : []),
   ];
   const pedido = params.get("tab") as Tab | null;
+  // Los usuarios se mudaron a su propio panel.
+  if (params.get("tab") === "usuarios") return <Navigate to="/usuarios" replace />;
   const tab: Tab = tabs.some(t => t.key === pedido) ? pedido! : "cuenta";
 
   return (
@@ -551,11 +217,13 @@ export function ConfiguracionPage() {
               <Icon name={t.icon} size={17} />{t.label}
             </button>
           ))}
+          {puede(user, "usuarios") && (
+            <Link to="/usuarios" className="cfg-nav-link"><Icon name="admin_panel_settings" size={17} />Usuarios y permisos</Link>
+          )}
         </nav>
         <div className="cfg-contenido">
           {tab === "cuenta" && <MiCuenta key={user?.id} />}
           {tab === "firma" && <MiFirmaSeccion />}
-          {tab === "usuarios" && esAdmin && <Usuarios />}
         </div>
       </div>
 
@@ -567,7 +235,9 @@ export function ConfiguracionPage() {
           border-left: 3px solid transparent; background: transparent; color: var(--text-secondary);
           font: inherit; font-size: 13px; cursor: pointer; text-align: left;
         }
-        .cfg-nav button:hover { color: var(--text-primary); }
+        .cfg-nav button:hover, .cfg-nav-link:hover { color: var(--text-primary); }
+        .cfg-nav-link { display: flex; align-items: center; gap: 10px; padding: 11px 16px; font-size: 13px; color: var(--text-secondary);
+          text-decoration: none; border-top: 1px solid var(--border); margin-top: 6px; white-space: nowrap; }
         .cfg-nav button.activo { background: var(--accent-light); border-left-color: var(--accent); color: var(--accent-text); font-weight: 600; }
         .cfg-contenido { flex: 1; min-width: 0; padding: 24px 28px; }
         @media (max-width: 720px) {

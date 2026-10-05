@@ -49,12 +49,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="header-right">
           {user?.is_superadmin ? (
             <span className="admin-badge" title="Superusuario"><Icon name="shield_person" size={13} /><span className="admin-badge-txt">superusuario</span></span>
-          ) : user?.is_admin ? (
-            <span className="admin-badge" title="Administrador"><Icon name="admin_panel_settings" size={13} /><span className="admin-badge-txt">admin</span></span>
+          ) : (user?.rango ?? 0) > 0 ? (
+            <span className="admin-badge" title={user?.rango === 2 ? "Administrador nivel 1" : "Administrador nivel 2"}>
+              <Icon name="admin_panel_settings" size={13} /><span className="admin-badge-txt">admin {user?.rango === 2 ? "1" : "2"}</span>
+            </span>
           ) : (
             null
           )}
-          <Link to="/configuracion" className="header-icon-btn header-user" title="Configuración: mis datos, firma y usuarios"
+          <Link to="/configuracion" className="header-icon-btn header-user" title="Configuración: mis datos y firma"
             style={isActive("/configuracion") ? { background: "rgba(255,255,255,0.12)" } : undefined}>
             <Icon name="settings" size={16} />
             <span className="header-username">{user?.nombre?.split(" ")[0] || user?.username}</span>
@@ -142,6 +144,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           .header-username, .header-btn-label { display: none; }
         }
         @media (max-width: 1180px) { .nav-item span:not(.material-symbols-outlined) { display: none; } .nav-item { padding: 0 12px; } }
+        /* En el celular las pestañas se desplazan de lado dentro de la barra,
+           en vez de empujar la página entera. */
+        @media (max-width: 760px) {
+          .header-left { flex: 1; min-width: 0; }
+          .header-nav { overflow-x: auto; scrollbar-width: none; min-width: 0; }
+          .header-nav::-webkit-scrollbar { display: none; }
+          .logo-text, .admin-badge { display: none; }
+          .nav-item { padding: 0 10px; }
+        }
 
         .header-right { display: flex; align-items: center; gap: 6px; }
 

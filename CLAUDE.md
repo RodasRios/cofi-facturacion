@@ -17,7 +17,7 @@ The owner is not an experienced programmer and works alone on this repo — ther
 
 **cofi-facturacion** is a full-stack web app for **Triturados y Concretos Ltda**, covering the commercial/dispatch flow for selling materials (triturados, agregados) from quarry plants to clients. It was scaffolded from `cofi-gestor-insumos` (a sibling project by the same owner) — the JWT auth pattern, the ReportLab PDF-generation approach, and the frontend theme/CSS were reused, but the domain and data model are entirely different and unrelated. **Do not assume any data or business rules carry over between the two repos** beyond those three reused mechanisms.
 
-Unlike `cofi-gestor-insumos`, this project is **single-tenant** (one company, no `Empresa`/multi-tenant layer). Access is per-tab permissions (`User.permisos`), `is_admin` as a blanket override, and one `is_superadmin` tier for the owner (see "Permisos por pestaña" below).
+Unlike `cofi-gestor-insumos`, this project is **single-tenant** (one company, no `Empresa`/multi-tenant layer). Access is by roles (`User.roles`) plus optional extra permissions, with a superusuario tier for the owner (see "Roles y permisos" below).
 
 ### The flow (and where it currently stops)
 
@@ -257,36 +257,48 @@ aprobado ni OC se queda en "esperando pago". No hay campo `etapa` que pueda qued
 un paso al flujo, se agrega ahí y en el diccionario `ETAPAS` (que también dice
 qué rol tiene la pelota en cada etapa).
 
-### Permisos por pestaña
+### Roles y permisos (modelo traído de `cofi-gestor-insumos`)
 
-`User.permisos` (JSON, lista de claves) decide qué ve y hace cada usuario. El
-catálogo está en `api/permissions.py::PERMISOS` y **replicado** en
-`frontend/src/lib/permisos.ts` (con las plantillas "Comercial", "Despacho"…
-que usa el formulario de usuarios) — si se agrega uno, se agrega en los dos.
+Fuente única: `api/permissions.py`, **replicado** en `frontend/src/lib/permisos.ts`
+(`PERMISOS`, `ROLES` con color, `EXCLUSIVOS`) — si se agrega uno, se agrega en los dos.
 
-- Una clave por pestaña (`tablero`, `clientes`, `solicitudes`, `cotizaciones`,
-  `pagos`, `ordenes`, `despachos`, `disponibilidad`, `precios`) más dos de
-  aprobación separadas (`aprobar_cotizaciones`, `aprobar_pagos`) para que quien
-  arma no sea quien aprueba.
-- Backend: cada vista declara `permission_classes = [Requiere(lectura, escritura)]`.
-  La lectura suele aceptar varias claves porque una pestaña necesita datos de
-  otra (Órdenes lee cotizaciones; Despachos lee órdenes). `tiene(user, ...)`
-  para chequeos dentro de un método.
-- **Exclusivos** (`EXCLUSIVOS`, hoy solo `aprobar_pagos`): ni un admin los tiene
-  por serlo; hay que marcarlos a propósito (pedido de la clienta: aprobar pagos es
-  solo de financiera). Replicado en `lib/permisos.ts`.
-- Frontend: `AppShell` muestra solo las pestañas permitidas, `ProtectedRoute`
-  recibe `permisos` y redirige a `rutaInicial(user)`; los botones usan `puede()`.
-- `User.plantas` (M2M): si tiene plantas asignadas, solo ve y trabaja órdenes,
-  despachos y disponibilidad de esas (`plantas_de(user)`; vacío = todas).
-- `User.rol` quedó como dato histórico: ya **no** da permisos. La migración 0012
-  convirtió los roles viejos en permisos (`PERMISOS_POR_ROL`).
-- No TOTP/2FA (existe en `cofi-gestor-insumos`, se dejó fuera a propósito).
+- **Permiso** = una pestaña o acción (`tablero`, `clientes`, `solicitudes`,
+  `cotizaciones`, `aprobar_cotizaciones`, `pagos`, `aprobar_pagos`, `ordenes`,
+  `despachos`, `disponibilidad`, `precios`, `usuarios`). Las vistas preguntan
+  **siempre por permiso** (`Requiere(lectura, escritura)`, `tiene()`), nunca por rol
+  ni por `is_admin`. La lectura suele aceptar varias claves (Órdenes lee cotizaciones…).
+- **Rol** = puesto (`User.roles`, lista): niveles de administración `admin`
+  (nivel 1) y `coordinador` (nivel 2, todo menos aprobar) **van solos**; puestos
+  `comercial`, `aprobador`, `financiera`, `logistica`, `despacho`,
+  `disponibilidad` **se combinan**. `PERMISOS_DE_ROL` dice qué abre cada uno.
+- **Permisos adicionales** (`User.permisos`): ajuste fino por persona, se suman a
+  los de sus roles. Efectivos = `permisos_de(user)`; la API los manda en `permisos`
+  (los guardados van en `permisos_extra`). No leer `User.permisos` solo.
+- `is_admin` ⇔ rol `admin` (lo sincroniza `User.save()`; quitar el rol baja
+  `is_admin` en el serializer). `PERMISOS_POR_ROL` es el mapa VIEJO de `User.rol`
+  que usa la migración 0012: no tocar. 0015 convirtió permisos → roles sin cambiar accesos.
+- **Exclusivos** (`EXCLUSIVOS`, hoy `aprobar_pagos`): ningún nivel de administración
+  lo trae (pedido de la clienta); se da con el rol Financiera o a propósito.
+- **Jerarquía** (`rango()`: superusuario 3, nivel 1 = 2, nivel 2 = 1, puestos 0):
+  solo se gestiona a quien está por debajo y solo se dan roles por debajo del propio
+  rango; un nivel 2 además no reparte permisos que no tiene. Reglas en `user_views.py`.
+- `User.plantas` (M2M): un usuario de rango 0 con plantas solo ve órdenes, despachos y
+  disponibilidad de esas (`plantas_de(user)`; vacío = todas).
+- **"Le toca a"** del tablero: `PERMISO_DE_ETAPA` → `responsables()`, que nombra a
+  quienes tienen el puesto de `RESPONSABLES_POR_PERMISO` (o, si nadie, a quien tenga el permiso).
+- `User.rol` quedó como dato histórico. No TOTP/2FA (se dejó fuera a propósito).
+
+**Panel Usuarios y permisos** (`pages/UsuariosPage.tsx`, `/usuarios`, permiso
+`usuarios`; el "panel de superadmin" del gestor): resumen con alertas
+(`GET users/panel/`: nadie aprueba pagos/cotizaciones, nadie despacha, gente sin rol,
+claves temporales), tabla de personas con filtros, panel lateral por persona (datos,
+`components/usuarios/EditorRoles.tsx`, permisos adicionales, plantas, activar,
+restablecer clave, eliminar) y matriz roles × permisos.
 
 **Superusuario (`User.is_superadmin`)** — la cuenta del dueño. `User.save()` lo
 fuerza a ser también `is_admin`. Reglas en `api/views/user_views.py`:
-- Un admin crea y edita usuarios normales; **solo el superusuario** crea, edita,
-  da o quita permisos de admin/superusuario y toca cuentas de administradores.
+- **Solo el superusuario** nombra niveles 1 y superusuarios y toca sus cuentas
+  (ver Jerarquía arriba).
 - Nadie se quita su propio acceso, y siempre queda al menos un superusuario activo.
 - **Eliminar** solo borra si el usuario no tiene documentos (`User.tiene_documentos()`);
   si los tiene, responde 409 y se desactiva en su lugar — así las cotizaciones
@@ -295,16 +307,16 @@ fuerza a ser también `is_admin`. Reglas en `api/views/user_views.py`:
   Si se pierde el acceso: `python manage.py superusuario <usuario> --password`.
 
 **Contraseñas temporales**: al crear un usuario o restablecer su contraseña desde
-Configuración → Usuarios, la clave la genera el navegador, se muestra una sola vez
+el panel de Usuarios, la clave la genera el navegador, se muestra una sola vez
 para copiarla, y queda `debe_cambiar_password=True`. `ProtectedRoute` manda a esa
 persona a `/primer-ingreso` hasta que la cambie (`POST auth/cambiar-password`, que
 en ese caso no pide la actual). El login no distingue mayúsculas en el usuario.
 
 **Configuración** (`pages/ConfiguracionPage.tsx`, `/configuracion`, ícono de engranaje
 con el nombre en la cabecera; idea traída de `cofi-gestor-insumos`):
-Mi cuenta (nombre, cédula, cargo, teléfono, correo + contraseña, `PATCH auth/perfil`),
+Mi cuenta (nombre, cédula, cargo, teléfono, correo + contraseña, `PATCH auth/perfil`) y
 Mi firma (con recorte, `components/ui/ImageCropper.tsx`, y vista previa de cómo sale
-en la cotización) y Usuarios (admin/superusuario). La cédula sale bajo el nombre del
+en la cotización). Los usuarios están en `/usuarios`. La cédula sale bajo el nombre del
 firmante en la cotización FR-GC-08. `/admin` quedó solo para plantas y precios.
 
 **Resumen del tablero** (`GET tablero/resumen/`, `components/ResumenTablero.tsx`):

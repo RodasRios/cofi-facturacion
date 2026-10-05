@@ -907,21 +907,60 @@ class GestionUsuariosTest(TestCase):
 
     def test_admin_no_crea_ni_toca_administradores(self):
         self._login("jefe")
-        r = self.api.post("/api/v1/users/", {"username": "otro", "password": "temporal123", "is_admin": True}, format="json")
+        r = self.api.post("/api/v1/users/", {"username": "otro", "password": "temporal123", "roles": ["admin"]}, format="json")
         self.assertEqual(r.status_code, 403)
-        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"is_admin": True}, format="json")
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"roles": ["admin"]}, format="json")
         self.assertEqual(r.status_code, 403)
         r = self.api.patch(f"/api/v1/users/{self.super.id}/", {"nombre": "X"}, format="json")
         self.assertEqual(r.status_code, 403)
-        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"rol": "planta"}, format="json")
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"is_superadmin": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        # Un nivel 1 sí nombra niveles 2 y puestos.
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"roles": ["coordinador"]}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["rango"], 1)
 
     def test_superusuario_gestiona_admins(self):
         self._login("dueno")
-        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"is_admin": True}, format="json")
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"roles": ["admin"]}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["is_admin"])
+        r = self.api.patch(f"/api/v1/users/{self.comercial.id}/", {"roles": ["comercial", "logistica"]}, format="json")
+        self.assertFalse(r.json()["is_admin"])
+        self.assertEqual(r.json()["roles"], ["comercial", "logistica"])
         r = self.api.patch(f"/api/v1/users/{self.admin.id}/", {"is_superadmin": True}, format="json")
         self.assertTrue(r.json()["is_admin"] and r.json()["is_superadmin"])
+
+    def test_roles_y_permisos_efectivos(self):
+        self._login("dueno")
+        r = self.api.post("/api/v1/users/", {
+            "username": "bascula", "password": "temporal123",
+            "roles": ["disponibilidad", "despacho"], "permisos_extra": ["tablero"],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["roles"], ["despacho", "disponibilidad"])
+        self.assertEqual(r.json()["permisos"], ["tablero", "despachos", "disponibilidad"])
+        self.assertEqual(r.json()["permisos_extra"], ["tablero"])
+        # Un nivel de administración va solo.
+        r = self.api.patch(f"/api/v1/users/{r.json()['id']}/", {"roles": ["admin", "comercial"]}, format="json")
+        self.assertEqual(r.status_code, 400)
+        # El nivel 1 no aprueba pagos por serlo.
+        self.assertNotIn("aprobar_pagos", self.api.get("/api/v1/users/").json()[0]["permisos"])
+
+    def test_nivel_2_no_reparte_aprobaciones(self):
+        coord = self._user("coord", roles=["coordinador"], permisos=[])
+        self._login("coord")
+        r = self.api.post("/api/v1/users/", {"username": "fin", "password": "temporal123", "roles": ["financiera"]}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.api.post("/api/v1/users/", {"username": "ven", "password": "temporal123", "roles": ["comercial"]}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        r = self.api.patch(f"/api/v1/users/{self.admin.id}/", {"nombre": "X"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.api.patch(f"/api/v1/users/{coord.id}/", {"roles": ["comercial"]}, format="json")
+        self.assertEqual(r.status_code, 400)
+        # Panel: alerta si nadie aprueba pagos
+        panel = self.api.get("/api/v1/users/panel/").json()
+        self.assertIn("sin_aprobar_pagos", [a["tipo"] for a in panel["alertas"]])
 
     def test_no_se_queda_sin_superusuario(self):
         self._login("dueno")

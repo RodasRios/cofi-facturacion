@@ -224,7 +224,7 @@ export function TableroPage() {
               <th>Solicitud</th>
               <th>Cliente</th>
               <th>Etapa actual</th>
-              <th>Responsable</th>
+              <th>Le toca a</th>
               <th>Lleva</th>
               <th>Cotización</th>
               <th style={{ textAlign: "right" }}>Total</th>
@@ -250,7 +250,13 @@ export function TableroPage() {
                       </span>
                     )}
                   </td>
-                  <td>{f.responsable ? ROL_LABEL[f.responsable] : "-"}</td>
+                  <td className="tb-toca" title={f.responsables.map(r => r.nombre).join(", ")}>
+                    {f.etapa === "despachada" ? "-"
+                      : f.responsables.length ? (f.responsables.length > 2
+                        ? `${f.responsables.slice(0, 2).map(r => r.nombre.split(" ")[0]).join(", ")} +${f.responsables.length - 2}`
+                        : f.responsables.map(r => r.nombre.split(" ")[0]).join(" o "))
+                      : f.responsable ? <span style={{ color: "#dc2626" }} title="Nadie tiene el rol para este paso">{ROL_LABEL[f.responsable]} (sin asignar)</span> : "-"}
+                  </td>
                   <td style={lento ? { color: "#ef4444", fontWeight: 600 } : undefined}>
                     {f.etapa === "despachada" ? "-" : tiempoEnEtapa(f.dias_en_etapa)}
                   </td>
