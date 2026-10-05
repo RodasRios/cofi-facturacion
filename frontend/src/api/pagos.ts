@@ -37,3 +37,8 @@ export async function getCartera(): Promise<FilaCartera[]> {
   const res = await client.get("/pagos/cartera/");
   return res.data;
 }
+
+/** Quiénes pueden aprobar pagos (Financiera y Administrador nivel 1). */
+export async function getAprobadoresPago(): Promise<{ id: number; nombre: string }[]> {
+  return (await client.get("/pagos/aprobadores/")).data;
+}

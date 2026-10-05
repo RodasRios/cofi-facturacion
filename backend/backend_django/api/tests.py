@@ -944,8 +944,8 @@ class GestionUsuariosTest(TestCase):
         # Un nivel de administración va solo.
         r = self.api.patch(f"/api/v1/users/{r.json()['id']}/", {"roles": ["admin", "comercial"]}, format="json")
         self.assertEqual(r.status_code, 400)
-        # El nivel 1 no aprueba pagos por serlo.
-        self.assertNotIn("aprobar_pagos", self.api.get("/api/v1/users/").json()[0]["permisos"])
+        # El nivel 1 tiene todo, también aprobar pagos.
+        self.assertIn("aprobar_pagos", self.api.get("/api/v1/users/").json()[0]["permisos"])
 
     def test_nivel_2_no_reparte_aprobaciones(self):
         coord = self._user("coord", roles=["coordinador"], permisos=[])
@@ -958,9 +958,9 @@ class GestionUsuariosTest(TestCase):
         self.assertEqual(r.status_code, 403)
         r = self.api.patch(f"/api/v1/users/{coord.id}/", {"roles": ["comercial"]}, format="json")
         self.assertEqual(r.status_code, 400)
-        # Panel: alerta si nadie aprueba pagos
+        # Panel: con un nivel 1 activo, alguien aprueba pagos.
         panel = self.api.get("/api/v1/users/panel/").json()
-        self.assertIn("sin_aprobar_pagos", [a["tipo"] for a in panel["alertas"]])
+        self.assertNotIn("sin_aprobar_pagos", [a["tipo"] for a in panel["alertas"]])
 
     def test_no_se_queda_sin_superusuario(self):
         self._login("dueno")
@@ -1276,12 +1276,10 @@ class EdicionYCorreccionesTest(TestCase):
             "items": [{"material": self.material.id, "planta": self.planta.id, "cantidad": 5}]}, format="json")
         self.assertEqual(r.status_code, 400)
 
-    def test_aprobar_pagos_solo_con_permiso_explicito(self):
+    def test_aprueban_pagos_financiera_y_nivel_1(self):
         cot = self._cotizar(self._solicitud())
         self.api.post(f"/api/v1/cotizaciones/{cot['id']}/aprobar/", {"aprobar": True}, format="json")
         pago = self.api.post("/api/v1/pagos/", {"cotizacion": cot["id"], "monto": 100}, format="json").json()
-        # El admin registra pero no aprueba.
-        self.assertEqual(self.api.post(f"/api/v1/pagos/{pago['id']}/aprobar/", {"aprobar": True}, format="json").status_code, 403)
         self._login(self.fin)
         r = self.api.post(f"/api/v1/pagos/{pago['id']}/aprobar/", {"aprobar": True}, format="json")
         self.assertEqual(r.status_code, 200, r.content)

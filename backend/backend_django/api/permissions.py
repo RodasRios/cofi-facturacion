@@ -40,11 +40,10 @@ PERMISOS = [
 ]
 CLAVES = [p[0] for p in PERMISOS]
 
-# Permisos que ni un administrador tiene por el solo hecho de serlo: hay que
-# dárselos a propósito (rol Financiera o permiso adicional). Aprobar pagos es
-# de financiera — que un admin apruebe la plata que él mismo registró es justo
-# lo que se quiere evitar.
-EXCLUSIVOS = {"aprobar_pagos"}
+# Permisos que ni un Administrador nivel 1 tendría por serlo (habría que
+# dárselos a propósito). Hoy ninguno: el dueño decidió que el nivel 1 tiene
+# todo, incluido aprobar pagos. Se deja el mecanismo por si vuelve a hacer falta.
+EXCLUSIVOS = set()
 APROBACIONES = {"aprobar_cotizaciones", "aprobar_pagos"}
 
 
@@ -58,7 +57,7 @@ ROL_COORDINADOR = "coordinador"
 ROLES = {
     ROL_ADMIN: {
         "label": "Administrador nivel 1",
-        "descripcion": "Todo: aprobar cotizaciones, precios y usuarios. Aprobar pagos solo si se le da aparte.",
+        "descripcion": "Todo: aprobar cotizaciones y pagos, precios y usuarios.",
     },
     ROL_COORDINADOR: {
         "label": "Administrador nivel 2",

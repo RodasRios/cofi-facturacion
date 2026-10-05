@@ -200,8 +200,8 @@ function MatrizRoles() {
     <div>
       <p className="us-ayuda">
         Qué abre cada rol. A una persona se le pueden combinar varios puestos y, si hace falta, sumarle permisos
-        sueltos desde su ficha. <strong>Aprobar pagos</strong> no viene con ningún nivel de administración:
-        se da con el rol Financiera o a propósito.
+        sueltos desde su ficha. Las aprobaciones (cotizaciones y pagos) las tienen
+        el Administrador nivel 1 y los puestos de Gerencia y Financiera; el nivel 2 no aprueba.
       </p>
       <div className="us-tabla-wrap">
         <table className="table-sharp us-matriz">

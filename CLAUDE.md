@@ -28,7 +28,7 @@ Cliente (nuevo o existente)
   → Formato de Cotización                    [comercial arma la cotización, PDF auto-generado]
   → Aprobación                               [aprobador aprueba/rechaza]
   → Pagos parciales y/o orden de compra      [permiso "pagos"; pueden ser varios abonos]
-  → Aprobación de pago / confirmación de OC  [permiso "aprobar_pagos"]
+  → Aprobación de pago / confirmación de OC  [permiso "aprobar_pagos": Financiera o Admin nivel 1]
   → Formato de Orden de Suministro           [MANUAL, permiso "ordenes"; parcial, con placas y fecha; PDF auto-generado]
   → Notificación a Planta                    [WhatsApp Web / correo con el PDF, desde Órdenes]
   → Control de Despacho y Recibo de Material [permiso "despachos"; parcial, con foto/PDF del tiquete]
@@ -277,8 +277,9 @@ Fuente única: `api/permissions.py`, **replicado** en `frontend/src/lib/permisos
 - `is_admin` ⇔ rol `admin` (lo sincroniza `User.save()`; quitar el rol baja
   `is_admin` en el serializer). `PERMISOS_POR_ROL` es el mapa VIEJO de `User.rol`
   que usa la migración 0012: no tocar. 0015 convirtió permisos → roles sin cambiar accesos.
-- **Exclusivos** (`EXCLUSIVOS`, hoy `aprobar_pagos`): ningún nivel de administración
-  lo trae (pedido de la clienta); se da con el rol Financiera o a propósito.
+- **Aprobar pagos**: lo tienen el Administrador nivel 1 (que tiene todo) y Financiera;
+  el nivel 2 no. `EXCLUSIVOS` (permisos que ni el nivel 1 trae) quedó vacío a propósito.
+  Pagos muestra a quien no puede aprobar quiénes sí (`GET /pagos/aprobadores/`).
 - **Jerarquía** (`rango()`: superusuario 3, nivel 1 = 2, nivel 2 = 1, puestos 0):
   solo se gestiona a quien está por debajo y solo se dan roles por debajo del propio
   rango; un nivel 2 además no reparte permisos que no tiene. Reglas en `user_views.py`.

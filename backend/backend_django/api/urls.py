@@ -12,7 +12,7 @@ from api.views.cotizacion_views import (
     CotizacionListCreateView, CotizacionDetailView, CotizacionAprobarView, CotizacionPdfView,
     NotasAclaratoriasView,
 )
-from api.views.pago_views import PagoListCreateView, PagoComprobanteUploadView, PagoAprobarView, CarteraView
+from api.views.pago_views import PagoListCreateView, PagoComprobanteUploadView, PagoAprobarView, CarteraView, AprobadoresPagoView
 from api.views.orden_suministro_views import (
     OrdenSuministroListView, OrdenSuministroDetailView, OrdenSuministroNotificarView, OrdenSuministroPdfView,
     OrdenSuministroPdfPublicoView, CotizacionesPorOrdenarView,
@@ -95,6 +95,7 @@ urlpatterns += p("cotizaciones/", CotizacionListCreateView.as_view())
 urlpatterns += p("pagos/<int:pago_id>/comprobante/", PagoComprobanteUploadView.as_view())
 urlpatterns += p("pagos/<int:pago_id>/aprobar/", PagoAprobarView.as_view())
 urlpatterns += p("pagos/cartera/", CarteraView.as_view())
+urlpatterns += p("pagos/aprobadores/", AprobadoresPagoView.as_view())
 urlpatterns += p("pagos/", PagoListCreateView.as_view())
 
 # Órdenes de suministro

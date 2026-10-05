@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from api.models import Pago, Cotizacion, Seguimiento
 from api.serializers import PagoSerializer
-from api.permissions import Requiere
+from api.permissions import Requiere, equipo, responsables
 
 logger = logging.getLogger(__name__)
 
@@ -220,3 +220,13 @@ class CarteraView(APIView):
             })
         filas.sort(key=lambda f: -Decimal(f["saldo_por_cobrar"]))
         return Response(filas)
+
+
+class AprobadoresPagoView(APIView):
+    """Quiénes pueden aprobar pagos. Lo muestra Pagos a quien no puede, para que
+    sepa a quién acudir — o que nadie tiene el permiso."""
+    permission_classes = [Requiere(("pagos", "aprobar_pagos"))]
+
+    def get(self, request):
+        gente = [u for u in equipo() if "aprobar_pagos" in u._permisos]
+        return Response([{"id": u.id, "nombre": u.nombre or u.username} for u in gente])

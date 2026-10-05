@@ -17,10 +17,10 @@ export const PERMISOS: { clave: Permiso; pestana: string; desc: string }[] = [
 ];
 
 /**
- * Ni un administrador los tiene por serlo: hay que darlos a propósito
- * (api/permissions.py::EXCLUSIVOS). Aprobar pagos es de financiera.
+ * Ni un administrador nivel 1 los tendría por serlo (api/permissions.py::EXCLUSIVOS).
+ * Hoy ninguno: el nivel 1 tiene todo, incluido aprobar pagos.
  */
-export const EXCLUSIVOS: Permiso[] = ["aprobar_pagos"];
+export const EXCLUSIVOS: Permiso[] = [];
 
 const TODOS = PERMISOS.map(p => p.clave);
 
@@ -36,7 +36,7 @@ export interface RolInfo {
 /** Mismo catálogo que api/permissions.py::ROLES y PERMISOS_DE_ROL (más el color). */
 export const ROLES: RolInfo[] = [
   { clave: "admin", label: "Administrador nivel 1", color: "#059669", grupo: "administracion",
-    desc: "Todo: aprobar cotizaciones, precios y usuarios. Aprobar pagos solo si se le da aparte.",
+    desc: "Todo: aprobar cotizaciones y pagos, precios y usuarios.",
     permisos: TODOS.filter(c => !EXCLUSIVOS.includes(c)) },
   { clave: "coordinador", label: "Administrador nivel 2", color: "#7c3aed", grupo: "administracion",
     desc: "Todo el trabajo diario, precios y usuarios, pero no aprueba cotizaciones ni pagos.",

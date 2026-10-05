@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getPagos, createPago, uploadComprobante, aprobarPago } from "../api/pagos";
+import { getPagos, createPago, uploadComprobante, aprobarPago, getAprobadoresPago } from "../api/pagos";
 import { getCotizaciones } from "../api/cotizaciones";
 import { useAuth } from "../contexts/AuthContext";
 import { Icon } from "../components/ui/Icon";
@@ -139,6 +139,9 @@ export function PagosPage() {
   const qc = useQueryClient();
   const puedeRegistrar = puede(user, "pagos");
   const puedeAprobar = puede(user, "aprobar_pagos");
+  const { data: aprobadores } = useQuery({
+    queryKey: ["aprobadores-pago"], queryFn: getAprobadoresPago, enabled: !puedeAprobar,
+  });
   const { data: pagos, isLoading } = useQuery({ queryKey: ["pagos"], queryFn: () => getPagos() });
   const { data: cotizaciones } = useQuery({ queryKey: ["cotizaciones", "aprobada"], queryFn: () => getCotizaciones("aprobada") });
   const [form, setForm] = useState<{ cot: number | null } | null>(null);
@@ -197,6 +200,18 @@ export function PagosPage() {
       {porRevisar.length > 0 && (
         <section className="card pg-seccion">
           <h2>Por revisar <span className="pg-conteo">{porRevisar.length}</span></h2>
+          {!puedeAprobar && aprobadores && (
+            aprobadores.length ? (
+              <p className="pg-quien"><Icon name="info" size={15} />
+                Los aprueba: {aprobadores.map(a => a.nombre).join(", ")}.
+              </p>
+            ) : (
+              <p className="pg-quien alerta"><Icon name="warning" size={15} />
+                Nadie puede aprobar pagos todavía. Asígnale a alguien el rol <strong>Financiera</strong>
+                o <strong>Administrador nivel 1</strong> en <a href="/usuarios">Usuarios</a>.
+              </p>
+            )
+          )}
           <table className="table-sharp">
             <thead><tr><th>Cotización</th><th>Tipo</th><th className="der">Monto</th><th>Referencia</th><th>Registró</th><th /></tr></thead>
             <tbody>
@@ -323,6 +338,10 @@ export function PagosPage() {
         .pg-seccion h2, .pg-form h2 { font-size: 14px; font-weight: 700; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
         .pg-seccion-cab { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         .pg-conteo { font-size: 11px; font-weight: 600; background: var(--bg-surface-2); color: var(--text-muted); padding: 1px 7px; border-radius: 8px; }
+        .pg-quien { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--text-secondary); margin: 0 0 10px; }
+        .pg-quien.alerta { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; padding: 8px 10px; }
+        .dark .pg-quien.alerta { background: #2a1f05; color: #fbbf24; border-color: #78580c; }
+        .pg-quien a { color: inherit; font-weight: 600; }
         .pg .der { text-align: right; }
         .pg-sub { display: block; font-size: 11px; color: var(--text-muted); font-weight: 400; }
         .pg-sub-celda { font-size: 12px; }
