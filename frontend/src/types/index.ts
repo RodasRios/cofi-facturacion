@@ -104,6 +104,8 @@ export interface PlantaDisponibilidad extends Planta {
 export interface Material {
   id: number;
   nombre: string;
+  /** Código interno (columna CÓDIGO del control de despacho). */
+  codigo: string;
   tipo: MaterialTipo;
   tipo_display: string;
   unidad_medida: string;
@@ -403,8 +405,17 @@ export interface Despacho {
   consecutivo: string | null;
   fecha: string;
   recibido_por: string | null;
+  recibido_cargo: string;
   cliente_retira: boolean;
   placa_vehiculo: string | null;
+  /** Campos del talonario "Control de despacho y recibo de materiales". */
+  despachado_por_nombre: string;
+  despachado_por_cargo: string;
+  conductor_nombre: string;
+  conductor_cedula: string;
+  /** "HH:MM:SS" o null. */
+  hora_despacho: string | null;
+  temperatura_despacho: string;
   notas: string | null;
   pdf_path: string | null;
   /** Foto o PDF del tiquete firmado que sube la planta. */

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Icon } from "./ui/Icon";
-import { renombrarMaterial, unirMaterial } from "../api/materiales";
+import { renombrarMaterial, actualizarCodigoMaterial, unirMaterial } from "../api/materiales";
 import { mensajeError } from "../lib/errores";
 import type { Material, Planta } from "../types";
 
@@ -24,6 +24,11 @@ export function CatalogoMateriales({ materiales, plantas }: { materiales: Materi
     onSuccess: () => { invalidar(); toast.success("Nombre actualizado en toda la aplicación"); },
     onError: e => toast.error(mensajeError(e, "No se pudo renombrar")),
   });
+  const codigo = useMutation({
+    mutationFn: ({ id, codigo }: { id: number; codigo: string }) => actualizarCodigoMaterial(id, codigo),
+    onSuccess: () => { invalidar(); toast.success("Código guardado"); },
+    onError: e => toast.error(mensajeError(e, "No se pudo guardar el código")),
+  });
   const unir = useMutation({
     mutationFn: () => unirMaterial(uniendo!.id, Number(destino)),
     onSuccess: r => { invalidar(); toast.success(r.detail); setUniendo(null); setDestino(""); },
@@ -44,10 +49,14 @@ export function CatalogoMateriales({ materiales, plantas }: { materiales: Materi
         <input className="input-base" placeholder="Buscar material…" value={buscar} onChange={e => setBuscar(e.target.value)} />
       </div>
       <table className="table-sharp cm-tabla">
-        <thead><tr><th>Nombre (se guarda al salir de la casilla)</th><th>Unidad</th><th>Plantas que lo venden</th><th /></tr></thead>
+        <thead><tr><th title="Sale en la columna CÓDIGO del control de despacho">Código</th><th>Nombre (se guarda al salir de la casilla)</th><th>Unidad</th><th>Plantas que lo venden</th><th /></tr></thead>
         <tbody>
           {filas.map(m => (
             <tr key={m.id}>
+              <td>
+                <input className="input-base" key={`${m.id}-c-${m.codigo}`} defaultValue={m.codigo} style={{ width: 70 }}
+                  placeholder="—" onBlur={e => { const v = e.target.value.trim(); if (v !== (m.codigo ?? "")) codigo.mutate({ id: m.id, codigo: v }); }} />
+              </td>
               <td>
                 <input className="input-base" key={`${m.id}-${m.nombre}`} defaultValue={m.nombre} style={{ width: "100%" }}
                   onBlur={e => { const v = e.target.value.trim(); if (v && v !== m.nombre) renombrar.mutate({ id: m.id, nombre: v }); }}

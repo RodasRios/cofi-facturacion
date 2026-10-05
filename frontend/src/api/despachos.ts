@@ -6,9 +6,21 @@ export async function getDespachos(ordenSuministroId?: number): Promise<Despacho
   return res.data;
 }
 
-export async function createDespacho(data: {
-  orden_suministro: number; fecha: string; consecutivo?: string; recibido_por?: string; cliente_retira?: boolean;
-  placa_vehiculo?: string; notas?: string; items: { material: number; cantidad: number }[];
+/** Datos del formato (todo opcional menos la fecha). */
+export interface DatosFormatoDespacho {
+  fecha: string; consecutivo: string; hora_despacho: string; temperatura_despacho: string;
+  despachado_por_nombre: string; despachado_por_cargo: string;
+  placa_vehiculo: string; conductor_nombre: string; conductor_cedula: string;
+  recibido_por: string; recibido_cargo: string; notas: string;
+}
+
+export async function actualizarDespacho(id: number, data: Partial<DatosFormatoDespacho>): Promise<Despacho> {
+  return (await client.patch(`/despachos/${id}/`, data)).data;
+}
+
+export async function createDespacho(data: Partial<DatosFormatoDespacho> & {
+  orden_suministro: number; fecha: string; cliente_retira?: boolean;
+  items: { material: number; cantidad: number }[];
 }): Promise<Despacho> {
   const res = await client.post("/despachos/", data);
   return res.data;

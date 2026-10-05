@@ -27,6 +27,10 @@ export async function quitarPrecioMaterial(materialId: number, plantaId: number)
   return res.data;
 }
 
+export async function actualizarCodigoMaterial(id: number, codigo: string): Promise<Material> {
+  return (await client.patch(`/materiales/${id}/`, { codigo })).data;
+}
+
 export async function renombrarMaterial(id: number, nombre: string): Promise<Material> {
   const res = await client.patch(`/materiales/${id}/`, { nombre });
   return res.data;

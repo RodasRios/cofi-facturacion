@@ -220,29 +220,6 @@ def _items_table(items: list[dict], mostrar_precio: bool = True) -> Table:
     return t
 
 
-def generate_despacho(
-    path: Path, numero: str, fecha: date, cliente_nombre: str, planta_nombre: str,
-    items: list[dict], recibido_por: str | None = None, placa_vehiculo: str | None = None,
-    cliente_retira: bool = True, notas: str | None = None,
-) -> None:
-    doc = _base_doc(path, f"Remisión {numero}")
-    elements = _build_header("Control de Despacho y Recibo de Material (Remisión)", numero, fecha)
-    elements.append(_build_datos_generales([
-        ("Cliente", cliente_nombre),
-        ("Planta", planta_nombre),
-        ("Retira", "Cliente" if cliente_retira else "Transporte propio"),
-        ("Placa vehículo", placa_vehiculo or "-"),
-    ]))
-    elements.append(Spacer(1, 14))
-    elements.append(_items_table(items, mostrar_precio=False))
-    elements += _build_firmas_en_blanco(
-        f"Recibido por: {recibido_por or '_______________________'}<br/>Firma de recibido",
-        "Entregado por (Planta)<br/>Firma autorizada",
-    )
-    elements += _build_aclaraciones_section(notas)
-    _build_doc(doc, elements)
-
-
 def generate_vinculacion(
     path: Path, numero: str, fecha: date, cliente: dict, notas: str | None = None,
 ) -> None:
@@ -887,3 +864,189 @@ def generate_control_despachos(datos: dict) -> bytes:
 
     _build_doc(doc, e, on_page=pie)
     return buf.getvalue()
+
+
+# ── Control de despacho y recibo de materiales ───────────────────────────────
+
+EMPRESA_NIT = "836.000.742-1"
+EMPRESA_RUCOM = "RUCOM-201607017224"
+EMPRESA_TEL_FIJO = "211 6384"
+EMPRESA_EMAIL_DESPACHOS = "trituradosyconcretos@gmail.com"
+TINTA = colors.HexColor("#1d3f9a")      # los datos van "en tinta", como en el talonario
+BANDA = colors.HexColor("#231f20")
+GRIS_CAMPO = colors.HexColor("#d9dcd6")
+ROJO_NUMERO = colors.HexColor("#c8102e")
+
+
+def generate_despacho(path: Path, datos: dict) -> None:
+    """Calco del talonario "CONTROL DE DESPACHO Y RECIBO DE MATERIALES".
+
+    datos: numero (REM interno), consecutivo (tiquete), fecha, planta, cliente,
+    obra, orden, despachado_por {nombre, cargo}, items [{codigo, material,
+    cantidad, unidad}], placa, conductor {nombre, cedula}, hora_despacho,
+    temperatura_despacho, recibido {nombre, cargo}, notas.
+
+    Mismas secciones y en el mismo orden que el papel. Lo que se llena en la
+    obra (hora y temperatura de llegada e instalación, abscisado, VoBo) queda
+    en blanco para escribirlo a mano. La hoja mide lo que mida el contenido:
+    media carta con un material, más larga si el despacho trae varios.
+    """
+    ancho_pag = LETTER[0]
+    margen = 0.8 * cm
+    W = ancho_pag - 2 * margen - 12   # el Frame de ReportLab deja 6 pt de cada lado
+    c = W / 12
+
+    def esc(t):
+        return _escapar(str(t)) if t not in (None, "") else ""
+
+    lab_st = ParagraphStyle("lab", fontName="Helvetica-Bold", fontSize=6.8, leading=8)
+    val_st = ParagraphStyle("val", fontName="Helvetica", fontSize=11, leading=13, textColor=TINTA)
+    cen_st = ParagraphStyle("cen", fontName="Helvetica-Bold", fontSize=7.5, leading=9, alignment=TA_CENTER)
+    banda_st = ParagraphStyle("banda", fontName="Helvetica-Bold", fontSize=10, leading=12,
+                              alignment=TA_CENTER, textColor=colors.white)
+
+    def lv(etiqueta, valor=""):
+        v = esc(valor)
+        return Paragraph(f'<font name="Helvetica-Bold" size="6.8" color="black">{etiqueta}</font>'
+                         + (f"&nbsp;&nbsp;{v}" if v else ""), val_st)
+
+    def val(t, align=TA_LEFT):
+        return Paragraph(esc(t), ParagraphStyle("v2", parent=val_st, alignment=align))
+
+    def banda(t):
+        return Paragraph(t, banda_st)
+
+    filas, estilo = [], []
+
+    def fila(celdas, spans=(), alto=None):
+        """celdas: lista de (col_inicio, col_fin, contenido)."""
+        r = len(filas)
+        row = [""] * 12
+        for ini, fin, cont in celdas:
+            row[ini] = cont
+            if fin > ini:
+                estilo.append(("SPAN", (ini, r), (fin, r)))
+        filas.append(row)
+        alturas.append(alto)
+        return r
+
+    alturas = []
+
+    # ── Encabezado ──
+    logo = []
+    if LOGO_PATH.exists():
+        logo.append(Image(str(LOGO_PATH), width=3.3 * cm, height=1.0 * cm))
+    chico = ParagraphStyle("ch", fontName="Helvetica", fontSize=6.6, leading=8, alignment=TA_CENTER)
+    empresa = Table([[logo or ""], [Paragraph("<i>Construimos juntos el progreso</i>", chico)],
+                     [Paragraph(f"<b>NIT. {EMPRESA_NIT}</b>", chico)],
+                     [Paragraph(EMPRESA_EMAIL_DESPACHOS, ParagraphStyle("em", parent=chico, fontSize=5.8))]],
+                    colWidths=[3.6 * cm])
+    empresa.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("TOPPADDING", (0, 0), (-1, -1), 0),
+                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+    contacto = Paragraph(f"Cra. 4 N° 54-75<br/>CARTAGO {EMPRESA_TEL_FIJO}<br/>CEL: {EMPRESA_CELULAR}",
+                         ParagraphStyle("ct", fontName="Helvetica-Bold", fontSize=7, leading=9, alignment=TA_CENTER))
+    numero_tiq = datos.get("consecutivo") or datos["numero"]
+    titulo = [
+        Paragraph("CONTROL DE DESPACHO<br/>Y RECIBO DE MATERIALES",
+                  ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=12, leading=14, alignment=TA_CENTER)),
+        Spacer(1, 3),
+        Paragraph(f"N&ordm; &nbsp;{esc(numero_tiq)}",
+                  ParagraphStyle("n", fontName="Helvetica-Bold", fontSize=16, leading=18,
+                                 alignment=TA_CENTER, textColor=ROJO_NUMERO)),
+    ]
+    f = datos["fecha"]
+    fecha_t = Table([
+        [Paragraph("FECHA", cen_st), "", "", Paragraph("PLANTA:", lab_st)],
+        [Paragraph("DÍA", cen_st), Paragraph("MES", cen_st), Paragraph("AÑO", cen_st),
+         val((datos.get("planta") or "").replace("Planta ", ""))],
+        [val(f"{f.day:02d}", TA_CENTER), val(f"{f.month:02d}", TA_CENTER), val(f"{f.year % 100:02d}", TA_CENTER), ""],
+    ], colWidths=[0.8 * cm, 0.8 * cm, 0.8 * cm, 2.3 * cm])
+    fecha_t.setStyle(TableStyle([
+        ("GRID", (0, 0), (2, -1), 0.5, BORDE), ("BOX", (3, 0), (3, -1), 0.5, BORDE),
+        ("SPAN", (0, 0), (2, 0)), ("SPAN", (3, 1), (3, 2)),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("VALIGN", (3, 0), (3, 0), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    derecha = [Paragraph(EMPRESA_RUCOM, ParagraphStyle("ru", fontName="Helvetica-Bold", fontSize=7.5,
+                                                       alignment=TA_CENTER)), Spacer(1, 2), fecha_t]
+    fila([(0, 2, empresa), (3, 4, contacto), (5, 8, titulo), (9, 11, derecha)])
+    estilo += [("VALIGN", (0, 0), (-1, 0), "MIDDLE"), ("ALIGN", (9, 0), (11, 0), "CENTER")]
+
+    # ── Despachado por ──
+    r = fila([(0, 11, banda("DESPACHADO POR:"))]); estilo.append(("BACKGROUND", (0, r), (-1, r), BANDA))
+    dp = datos.get("despachado_por") or {}
+    fila([(0, 7, lv("NOMBRE:", dp.get("nombre"))), (8, 11, lv("CARGO:", dp.get("cargo")))], alto=0.75 * cm)
+
+    # ── Cliente ──
+    r = fila([(0, 11, banda("DATOS DEL CLIENTE"))]); estilo.append(("BACKGROUND", (0, r), (-1, r), BANDA))
+    fila([(0, 11, lv("RAZÓN SOCIAL:", datos.get("cliente")))], alto=0.7 * cm)
+    fila([(0, 11, lv("OBRA:", datos.get("obra")))], alto=0.7 * cm)
+
+    # ── Material ──
+    r = fila([(0, 11, banda("MATERIAL"))]); estilo.append(("BACKGROUND", (0, r), (-1, r), BANDA))
+    r = fila([(0, 1, Paragraph("CÓDIGO", cen_st)), (2, 8, Paragraph("DESCRIPCIÓN", cen_st)),
+              (9, 10, Paragraph("CANTIDAD", cen_st)), (11, 11, Paragraph("UNIDAD", cen_st))])
+    estilo.append(("BACKGROUND", (0, r), (-1, r), GRIS_CAMPO))
+    items = datos.get("items") or []
+    for it in items or [{}]:
+        fila([(0, 1, val(it.get("codigo"), TA_CENTER)), (2, 8, val(it.get("material"), TA_CENTER)),
+              (9, 10, val(_cantidad(it["cantidad"], 2) if it.get("cantidad") is not None else "", TA_CENTER)),
+              (11, 11, val(it.get("unidad"), TA_CENTER))], alto=0.75 * cm)
+    cond = datos.get("conductor") or {}
+    fila([(0, 3, lv("PLACA VEHÍCULO:", datos.get("placa"))), (4, 9, lv("NOMBRE CONDUCTOR:", cond.get("nombre"))),
+          (10, 11, lv("C.C.", cond.get("cedula")))], alto=0.75 * cm)
+
+    # ── Hora y temperatura ──
+    r = fila([(0, 5, Paragraph("HORA", cen_st)), (6, 11, Paragraph("TEMPERATURA", cen_st))])
+    estilo.append(("BACKGROUND", (0, r), (-1, r), GRIS_CAMPO))
+    hora = datos.get("hora_despacho")
+    hora_txt = hora.strftime("%I:%M %p").lstrip("0").lower() if hora else ""
+    r = fila([(0, 1, lv("DESPACHO PLANTA:", hora_txt)), (2, 3, lv("LLEGADA:")), (4, 5, lv("INSTALACIÓN:")),
+              (6, 7, lv("DESPACHO PLANTA:", datos.get("temperatura_despacho"))), (8, 9, lv("LLEGADA:")),
+              (10, 11, lv("INSTALACIÓN:"))], alto=0.95 * cm)
+    estilo.append(("VALIGN", (0, r), (-1, r), "TOP"))
+
+    # ── Recibido por / abscisado ──
+    r = fila([(0, 5, Paragraph("RECIBIDO POR:", cen_st)), (6, 11, Paragraph("ABSCISADO INSTALACIÓN", cen_st))])
+    estilo.append(("BACKGROUND", (0, r), (-1, r), GRIS_CAMPO))
+    rec = datos.get("recibido") or {}
+    fila([(0, 5, lv("NOMBRE", rec.get("nombre"))), (6, 7, Paragraph("INICIAL", cen_st)),
+          (8, 9, Paragraph("FINAL", cen_st)), (10, 11, Paragraph("TOTAL LONGITUD", cen_st))], alto=0.7 * cm)
+    fila([(0, 5, lv("CARGO", rec.get("cargo"))), (6, 7, ""), (8, 9, ""), (10, 11, "")], alto=0.7 * cm)
+
+    # ── VoBo / procesado oficina ──
+    caja = '<font name="ZapfDingbats" size="10">o</font>'
+    r = fila([(0, 5, Paragraph(f"VoBo &nbsp;PRODUCCIÓN {caja} &nbsp;/ OBRAS {caja} &nbsp;/ CLIENTE {caja}",
+                               ParagraphStyle("vb", parent=banda_st, fontSize=8.5))),
+              (6, 11, Paragraph("PROCESADO OFICINA", ParagraphStyle("po", parent=banda_st, fontSize=8.5)))])
+    estilo.append(("BACKGROUND", (0, r), (-1, r), BANDA))
+    fila([(0, 5, lv("NOMBRE")), (6, 11, lv("NOMBRE"))], alto=0.7 * cm)
+    fila([(0, 5, lv("CARGO")), (6, 11, lv("CARGO"))], alto=0.7 * cm)
+
+    tabla = Table(filas, colWidths=[c] * 12, rowHeights=alturas)
+    tabla.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.6, BORDE),
+        ("BOX", (0, 0), (-1, -1), 1.2, BORDE),
+        ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ] + estilo))
+
+    pie_st = ParagraphStyle("pie", fontName="Helvetica", fontSize=7.5, leading=9.5, textColor=GRAY_LABEL)
+    story = [tabla, Spacer(1, 4)]
+    if datos.get("notas"):
+        story.append(Paragraph(f"<b>Observaciones:</b> {esc(datos['notas'])}",
+                               ParagraphStyle("ob", parent=pie_st, textColor=colors.black, fontSize=8.5, leading=11)))
+    referencia = [f"Remisión {esc(datos['numero'])}"]
+    if datos.get("orden"):
+        referencia.append(f"Orden de suministro {esc(datos['orden'])}")
+    referencia.append("Documento generado por el sistema de facturación")
+    story.append(Paragraph(" · ".join(referencia), pie_st))
+
+    alto = 2 * margen + sum(fl.wrap(W, 10_000)[1] for fl in story) + 14
+    if isinstance(path, Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    doc = SimpleDocTemplate(str(path), pagesize=(ancho_pag, alto), title=f"Control de despacho {numero_tiq}",
+                            topMargin=margen, bottomMargin=margen, leftMargin=margen, rightMargin=margen)
+    doc.build(story)

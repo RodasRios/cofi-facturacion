@@ -1079,6 +1079,27 @@ class PermisosPlantaYNotificacionTest(TestCase):
         self.assertTrue(r.json()["soporte_path"].endswith(".jpg"))
         self.assertEqual(self.api.get(f"/api/v1/despachos/{despacho_id}/soporte/").status_code, 200)
 
+    def test_formato_control_de_despacho(self):
+        orden = self._orden(self.p1, self.l1, 20)
+        self._login(self.despachador)
+        r = self.api.post("/api/v1/despachos/", {
+            "orden_suministro": orden["id"], "fecha": "2026-09-16", "consecutivo": "764057",
+            "hora_despacho": "06:00", "temperatura_despacho": "16°", "placa_vehiculo": "WLR614",
+            "conductor_nombre": "Wilson Alzate", "conductor_cedula": "18505151",
+            "items": [{"material": self.material.id, "cantidad": 16}],
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        d = r.json()
+        # "Despachado por" sale de quien lo registra si no se escribe otro.
+        self.assertEqual(d["despachado_por_nombre"], "porteria")
+        self.assertEqual(d["hora_despacho"], "06:00:00")
+        r = self.api.patch(f"/api/v1/despachos/{d['id']}/", {"recibido_por": "Pedro", "recibido_cargo": "Residente"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["recibido_cargo"], "Residente")
+        r = self.api.get(f"/api/v1/despachos/{d['id']}/pdf/")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(b"".join(r.streaming_content).startswith(b"%PDF"))
+
     def test_notificar_por_whatsapp_y_correo(self):
         from django.core import mail
         orden = self._orden(self.p1, self.l1, 20)

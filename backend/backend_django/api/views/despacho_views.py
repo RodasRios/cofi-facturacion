@@ -20,29 +20,57 @@ def _numero_despacho():
     return siguiente(Despacho, "REM-")
 
 
-def _pdf_items(despacho):
-    return [
-        {
-            "material_nombre": i.material.nombre,
-            "cantidad": i.cantidad,
-            "unidad_medida": i.material.unidad_medida,
-        }
-        for i in despacho.items.select_related("material")
-    ]
+CAMPOS_FORMATO = (
+    "consecutivo", "recibido_por", "recibido_cargo", "placa_vehiculo", "notas",
+    "despachado_por_nombre", "despachado_por_cargo", "conductor_nombre", "conductor_cedula",
+    "temperatura_despacho",
+)
+
+
+def _limpio(v):
+    return (str(v).strip() if v is not None else "")
+
+
+def _hora(v):
+    """'06:00' → time; vacío o inválido → None."""
+    from datetime import datetime
+    v = _limpio(v)
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(v, fmt).time()
+        except ValueError:
+            pass
+    return None
 
 
 def _generar_pdf(despacho):
-    pdf_dir = settings.GENERATED_PDF_DIR
-    pdf_path = pdf_dir / f"REM_{despacho.id}_{despacho.numero.replace('-', '_')}.pdf"
+    """Calco del talonario de control de despacho. Se regenera al abrirlo, así
+    los despachos viejos salen con el formato y los datos al día."""
+    orden = despacho.orden_suministro
+    sol = orden.cotizacion.solicitud
+    pdf_path = settings.GENERATED_PDF_DIR / f"REM_{despacho.id}_{despacho.numero.replace('-', '_')}.pdf"
     try:
-        generate_despacho(
-            pdf_path, despacho.numero, despacho.fecha,
-            despacho.orden_suministro.cotizacion.solicitud.cliente.nombre,
-            despacho.orden_suministro.planta.nombre,
-            _pdf_items(despacho), recibido_por=despacho.recibido_por,
-            placa_vehiculo=despacho.placa_vehiculo, cliente_retira=despacho.cliente_retira,
-            notas=despacho.notas,
-        )
+        generate_despacho(pdf_path, {
+            "numero": despacho.numero,
+            "consecutivo": despacho.consecutivo,
+            "fecha": despacho.fecha,
+            "planta": orden.planta.nombre,
+            "cliente": sol.cliente.nombre,
+            "obra": orden.obra or sol.obra,
+            "orden": orden.numero,
+            "despachado_por": {"nombre": despacho.despachado_por_nombre, "cargo": despacho.despachado_por_cargo},
+            "items": [
+                {"codigo": i.material.codigo, "material": i.material.nombre,
+                 "cantidad": i.cantidad, "unidad": i.material.unidad_medida}
+                for i in despacho.items.select_related("material")
+            ],
+            "placa": despacho.placa_vehiculo,
+            "conductor": {"nombre": despacho.conductor_nombre, "cedula": despacho.conductor_cedula},
+            "hora_despacho": despacho.hora_despacho,
+            "temperatura_despacho": despacho.temperatura_despacho,
+            "recibido": {"nombre": despacho.recibido_por, "cargo": despacho.recibido_cargo},
+            "notas": despacho.notas,
+        })
         despacho.pdf_path = str(pdf_path)
         despacho.save(update_fields=["pdf_path"])
     except Exception as e:
@@ -88,11 +116,16 @@ class DespachoListCreateView(APIView):
         if not fecha:
             return Response({"detail": "fecha es requerida"}, status=400)
 
+        campos = {k: _limpio(d.get(k)) for k in CAMPOS_FORMATO}
+        # "Despachado por" es quien lo registra, salvo que se escriba otro.
+        campos["despachado_por_nombre"] = campos["despachado_por_nombre"] or (request.user.nombre or request.user.username)
+        campos["despachado_por_cargo"] = campos["despachado_por_cargo"] or (request.user.cargo or "")
+        for k in ("consecutivo", "recibido_por", "placa_vehiculo", "notas"):
+            campos[k] = campos[k] or None
         despacho = Despacho.objects.create(
             numero=_numero_despacho(), orden_suministro=orden, fecha=fecha,
-            consecutivo=(d.get("consecutivo") or "").strip() or None,
-            recibido_por=d.get("recibido_por"), cliente_retira=d.get("cliente_retira", True),
-            placa_vehiculo=d.get("placa_vehiculo"), notas=d.get("notas"), creado_por=request.user,
+            cliente_retira=d.get("cliente_retira", True), hora_despacho=_hora(d.get("hora_despacho")),
+            creado_por=request.user, **campos,
         )
         for it in items:
             material = Material.objects.filter(id=it.get("material")).first()
@@ -107,12 +140,32 @@ class DespachoListCreateView(APIView):
 
 
 class DespachoDetailView(APIView):
-    permission_classes = [Requiere(LEER_DESPACHOS)]
+    permission_classes = [Requiere(LEER_DESPACHOS, ("despachos",))]
 
     def get(self, request, despacho_id):
         despacho = _despachos_qs(request.user).filter(id=despacho_id).first()
         if not despacho:
             return Response({"detail": "No encontrado"}, status=404)
+        return Response(DespachoSerializer(despacho).data)
+
+    def patch(self, request, despacho_id):
+        """Completar los datos del formato después (recibido por, conductor…).
+        Las cantidades no se tocan aquí."""
+        despacho = _despachos_qs(request.user).filter(id=despacho_id).first()
+        if not despacho:
+            return Response({"detail": "No encontrado"}, status=404)
+        d = request.data
+        for k in CAMPOS_FORMATO:
+            if k in d:
+                v = _limpio(d[k])
+                setattr(despacho, k, v or (None if k in ("consecutivo", "recibido_por", "placa_vehiculo", "notas") else ""))
+        if "hora_despacho" in d:
+            despacho.hora_despacho = _hora(d["hora_despacho"])
+        if "fecha" in d and d["fecha"]:
+            despacho.fecha = d["fecha"]
+        despacho.save()
+        despacho.refresh_from_db()
+        _generar_pdf(despacho)
         return Response(DespachoSerializer(despacho).data)
 
 
@@ -121,7 +174,10 @@ class DespachoPdfView(APIView):
 
     def get(self, request, despacho_id):
         despacho = _despachos_qs(request.user).filter(id=despacho_id).first()
-        if not despacho or not despacho.pdf_path:
+        if not despacho:
+            return Response({"detail": "PDF no disponible"}, status=404)
+        _generar_pdf(despacho)
+        if not despacho.pdf_path:
             return Response({"detail": "PDF no disponible"}, status=404)
         path = Path(despacho.pdf_path)
         if not path.exists():

@@ -419,6 +419,12 @@ ya usaba en papel/Excel, tamaño carta, logo en `services/assets/logo_tyc.png`):
   `_COT_*` — si cambia el formato en papel, se cambia ahí.
 - `generate_orden_suministro(path, datos)` — tabla etiqueta/valor con obra,
   fecha de suministro, transporte y placas, y "Autorizó" = el comercial.
+- `generate_despacho(path, datos)` — calco del talonario **"Control de despacho y
+  recibo de materiales"** (Nº = `Despacho.consecutivo`, RUCOM, fecha día/mes/año,
+  despachado por, cliente/obra, material con `Material.codigo`, placa, conductor y C.C.,
+  hora/temperatura de despacho). Llegada, instalación, abscisado y VoBo quedan en
+  blanco para llenarlos a mano. Página de ancho carta y alto según el contenido. Se
+  regenera al abrirlo; `PATCH /despachos/<id>/` completa los datos después.
 - `generate_control_despachos(datos) -> bytes` — el consolidado por cliente
   ("Archivo data – control despachos" del flujo). **No se guarda**: se arma al
   vuelo en `GET /control-despachos/pdf/?cliente=&desde=&hasta=&obra=`.
@@ -440,9 +446,9 @@ después de emitida, `PATCH /ordenes-suministro/<id>/`, comercial o planta),
 interno) y `User.cargo/telefono` (salen bajo la firma; se editan en Admin →
 Usuarios). La firma la sube cada usuario desde Cotizaciones o Admin.
 
-**Formatos genéricos** (vinculación y remisión, aún con el estilo anterior):
+**Formato genérico** (vinculación, aún con el estilo anterior):
 
-`generate_vinculacion` and `generate_despacho` share:
+`generate_vinculacion` uses:
 - `_on_page(canvas, doc)` — brand color bar at the top and a footer (page number + "documento generado automáticamente") on every page, wired via `doc.build(elements, onFirstPage=_on_page, onLaterPages=_on_page)` (always go through the `_build_doc()` wrapper, don't call `doc.build()` directly, or the page decoration silently disappears).
 - `_build_header(titulo, numero, fecha)` — empresa name + document title + numero/fecha.
 - `_items_table(items, mostrar_precio=True)` — `mostrar_precio=False` drops the Precio/Subtotal columns entirely (used for `orden_suministro` and `despacho`, which are internal delivery documents, not billing documents — showing price columns full of `-` there was flagged as unprofessional-looking and removed).

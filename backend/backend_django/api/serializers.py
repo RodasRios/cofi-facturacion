@@ -164,7 +164,7 @@ class MaterialSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Material
-        fields = ["id", "nombre", "tipo", "tipo_display", "unidad_medida", "activo", "precios", "created_at"]
+        fields = ["id", "nombre", "codigo", "tipo", "tipo_display", "unidad_medida", "activo", "precios", "created_at"]
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -458,7 +458,8 @@ class DespachoSerializer(serializers.ModelSerializer):
         model = Despacho
         fields = [
             "id", "numero", "orden_suministro", "orden_suministro_numero", "planta_nombre",
-            "cliente_nombre", "consecutivo", "fecha", "recibido_por", "cliente_retira", "placa_vehiculo",
-            "notas", "pdf_path", "soporte_path", "items", "creado_por", "created_at",
+            "cliente_nombre", "consecutivo", "fecha", "recibido_por", "recibido_cargo", "cliente_retira", "placa_vehiculo",
+            "despachado_por_nombre", "despachado_por_cargo", "conductor_nombre", "conductor_cedula",
+            "hora_despacho", "temperatura_despacho", "notas", "pdf_path", "soporte_path", "items", "creado_por", "created_at",
         ]
         read_only_fields = ["numero", "creado_por", "pdf_path", "soporte_path"]

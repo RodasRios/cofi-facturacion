@@ -117,6 +117,8 @@ MATERIAL_TIPO_CHOICES = [
 
 class Material(models.Model):
     nombre = models.CharField(max_length=150)
+    # Código interno del material (columna CÓDIGO del control de despacho).
+    codigo = models.CharField(max_length=20, blank=True, default="")
     tipo = models.CharField(max_length=20, choices=MATERIAL_TIPO_CHOICES, default="agregado")
     unidad_medida = models.CharField(max_length=20, default="m3")
     activo = models.BooleanField(default=True)
@@ -706,6 +708,15 @@ class Despacho(models.Model):
     recibido_por = models.CharField(max_length=200, blank=True, null=True)
     cliente_retira = models.BooleanField(default=True)
     placa_vehiculo = models.CharField(max_length=20, blank=True, null=True)
+    # Campos del formato en papel "Control de despacho y recibo de materiales".
+    # Lo de llegada/instalación y el abscisado se llenan a mano en la obra.
+    despachado_por_nombre = models.CharField(max_length=150, blank=True, default="")
+    despachado_por_cargo = models.CharField(max_length=100, blank=True, default="")
+    conductor_nombre = models.CharField(max_length=150, blank=True, default="")
+    conductor_cedula = models.CharField(max_length=30, blank=True, default="")
+    hora_despacho = models.TimeField(null=True, blank=True)
+    temperatura_despacho = models.CharField(max_length=20, blank=True, default="")
+    recibido_cargo = models.CharField(max_length=100, blank=True, default="")
     notas = models.TextField(blank=True, null=True)
     pdf_path = models.CharField(max_length=500, blank=True, null=True)
     # Foto o PDF del tiquete/remisión firmado que sube la planta.
