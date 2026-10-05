@@ -701,7 +701,7 @@ class Despacho(models.Model):
     """Formato de Control de Despacho y Recibo de Material (Remisión)."""
     numero = models.CharField(max_length=50, unique=True)
     orden_suministro = models.ForeignKey(OrdenSuministro, on_delete=models.CASCADE, related_name="despachos")
-    # Número del tiquete que emite la planta (p. ej. 758812). No es el REM-xxxx
+    # Número del talonario en papel / tiquete de la planta (p. ej. 758812). No es el E-xxxxxx
     # interno: es el que figura en el control de despachos que se le envía al cliente.
     consecutivo = models.CharField(max_length=50, blank=True, null=True)
     fecha = models.DateField()

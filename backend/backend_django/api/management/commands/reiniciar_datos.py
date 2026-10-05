@@ -5,7 +5,7 @@ plantas, materiales, precios y disponibilidad.
     python manage.py reiniciar_datos          # pregunta antes de borrar
     python manage.py reiniciar_datos --si     # sin preguntar
 
-Los consecutivos (SC-, OS-, REM-, VIN-, COT) vuelven a empezar porque se
+Los consecutivos (SC-, OS-, E-, VIN-, COT) vuelven a empezar porque se
 calculan contando filas.
 """
 from django.conf import settings

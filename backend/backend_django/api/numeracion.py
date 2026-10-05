@@ -1,4 +1,4 @@
-"""Consecutivos de los documentos (SC-0001, OS-0001, REM-0001, VIN-0001, 160-2026).
+"""Consecutivos de los documentos (SC-0001, OS-0001, E-000001, VIN-0001, 160-2026).
 
 Se calculan con el MAYOR número existente, no contando filas: desde que se
 pueden borrar solicitudes, cotizaciones y órdenes, contar daba un número ya
@@ -19,11 +19,11 @@ def _max_numero(qs, patron, campo="numero"):
     return mayor
 
 
-def siguiente(modelo, prefijo, campo="numero"):
+def siguiente(modelo, prefijo, campo="numero", digitos=4):
     """"SC-" → "SC-0004" si el mayor existente es SC-0003."""
     qs = modelo.objects.filter(**{f"{campo}__startswith": prefijo})
     n = _max_numero(qs, re.escape(prefijo) + r"(\d+)", campo) + 1
-    return f"{prefijo}{n:04d}"
+    return f"{prefijo}{n:0{digitos}d}"
 
 
 def siguiente_anual(modelo, anio, inicial=0, campo="numero"):

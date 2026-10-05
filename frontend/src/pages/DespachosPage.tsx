@@ -28,7 +28,7 @@ function CamposFormato({ f, set, placasOrden, idLista }: {
         <legend>Despacho</legend>
         <div className="ds-campos">
           {campo("fecha", "Fecha", { type: "date", required: true })}
-          {campo("consecutivo", "N.° del talonario / tiquete", { placeholder: "764057" })}
+          {campo("consecutivo", "N.° del talonario en papel (si lo hay)", { placeholder: "Vacío = número electrónico E-" })}
           {campo("hora_despacho", "Hora de despacho", { type: "time" })}
           {campo("temperatura_despacho", "Temperatura en planta", { placeholder: "16°" })}
           {campo("despachado_por_nombre", "Despachado por", {}, true)}
@@ -245,7 +245,7 @@ export function DespachosPage() {
             {isLoading && <tr><td colSpan={7} className="ds-vacio">Cargando…</td></tr>}
             {despachos?.map(d => [
               <tr key={d.id}>
-                <td className="nowrap"><strong>{d.numero}</strong><span className="ds-sub">{d.orden_suministro_numero}{d.consecutivo && ` · tiq. ${d.consecutivo}`}</span></td>
+                <td className="nowrap"><strong>{d.numero}</strong><span className="ds-sub">{d.orden_suministro_numero}{d.consecutivo && ` · talonario ${d.consecutivo}`}</span></td>
                 <td className="nowrap">{new Date(d.fecha + "T00:00:00").toLocaleDateString("es-CO")}</td>
                 <td>{d.cliente_nombre}<span className="ds-sub">{d.planta_nombre}</span></td>
                 <td className="ds-sub-celda">{d.items.map(i => `${i.material_nombre} ${cant(n(i.cantidad))} ${i.unidad_medida}`).join(", ")}</td>

@@ -16,8 +16,15 @@ from services.pdf_service import generate_despacho
 logger = logging.getLogger(__name__)
 
 
+# Los controles de despacho que salen de la app llevan "E-" (electrónico) para
+# no cruzarse con los números del talonario en papel (p. ej. 764057). Si el
+# despacho se transcribe de un talonario, ese número va en `consecutivo` y es
+# el que se imprime como Nº.
+PREFIJO_DESPACHO = "E-"
+
+
 def _numero_despacho():
-    return siguiente(Despacho, "REM-")
+    return siguiente(Despacho, PREFIJO_DESPACHO, digitos=6)
 
 
 CAMPOS_FORMATO = (

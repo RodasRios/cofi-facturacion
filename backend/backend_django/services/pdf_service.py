@@ -881,7 +881,7 @@ ROJO_NUMERO = colors.HexColor("#c8102e")
 def generate_despacho(path: Path, datos: dict) -> None:
     """Calco del talonario "CONTROL DE DESPACHO Y RECIBO DE MATERIALES".
 
-    datos: numero (REM interno), consecutivo (tiquete), fecha, planta, cliente,
+    datos: numero (E-xxxxxx, electrónico), consecutivo (talonario en papel), fecha, planta, cliente,
     obra, orden, despachado_por {nombre, cargo}, items [{codigo, material,
     cantidad, unidad}], placa, conductor {nombre, cedula}, hora_despacho,
     temperatura_despacho, recibido {nombre, cargo}, notas.
@@ -1038,7 +1038,8 @@ def generate_despacho(path: Path, datos: dict) -> None:
     if datos.get("notas"):
         story.append(Paragraph(f"<b>Observaciones:</b> {esc(datos['notas'])}",
                                ParagraphStyle("ob", parent=pie_st, textColor=colors.black, fontSize=8.5, leading=11)))
-    referencia = [f"Remisión {esc(datos['numero'])}"]
+    referencia = [f"Control electrónico {esc(datos['numero'])}"
+                  + (f" (talonario {esc(datos['consecutivo'])})" if datos.get("consecutivo") else "")]
     if datos.get("orden"):
         referencia.append(f"Orden de suministro {esc(datos['orden'])}")
     referencia.append("Documento generado por el sistema de facturación")
